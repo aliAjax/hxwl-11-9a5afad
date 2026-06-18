@@ -852,17 +852,127 @@ input {
   margin-bottom: 4px;
 }
 
+.record-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.prescription-form {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 18px;
+}
+
+.form-section {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed #cbd5e1;
+}
+
+.form-section:last-of-type {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.form-section-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--primary);
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--primary) 8%, #ffffff);
+  border-radius: 6px;
+  border-left: 3px solid var(--primary);
+}
+
+.eyes-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.eye-block {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.eye-block-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: #1e293b;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.eye-fields-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.eye-fields-grid > label {
+  min-width: 0;
+}
+
+.eye-fields-grid > label span {
+  font-size: 12px;
+}
+
+.eye-fields-grid input,
+.eye-fields-grid select {
+  min-height: 38px;
+  font-size: 14px;
+}
+
+.field-error input,
+.field-error select,
+.field-error textarea {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
+.field-error em {
+  font-style: normal;
+  font-size: 11px;
+  color: #dc2626;
+  font-weight: 500;
+  margin-top: -4px;
+}
+
+.prescription-form .form-actions {
+  padding-top: 4px;
+}
+
 @media (max-width: 860px) {
   .hero,
   .workspace,
   .metrics-grid,
   .two-column,
   .form-row,
-  .reminder-columns {
+  .reminder-columns,
+  .eyes-row,
+  .eye-fields-grid {
     grid-template-columns: 1fr;
   }
 
   .field-grid {
     grid-template-columns: 1fr;
+  }
+
+  .record-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .record-actions button {
+    width: 100%;
   }
 }

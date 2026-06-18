@@ -18,11 +18,17 @@ interface EyeRefraction {
   sphere: string;
   cylinder: string;
   axis: string;
+  add: string;
+}
+
+interface EyeCurvature {
+  horizontal: string;
+  vertical: string;
 }
 
 interface CornealCurvature {
-  horizontal: string;
-  vertical: string;
+  right: EyeCurvature;
+  left: EyeCurvature;
 }
 
 interface RefractionRecord {
@@ -264,15 +270,15 @@ const refractionRecords: RefractionRecord[] = [
     patientNo: "Patient-032",
     category: "儿童近视",
     type: "复查",
-    summary: "右眼-2.75DS，轴位180",
+    summary: "右眼-2.75DS/-0.50DC×180°，左眼-2.25DS/-0.25DC×175°，PD 58mm",
     patientName: "张小明",
     ageGroup: "儿童",
     gender: "男",
     examDate: "2026-05-15",
-    rightEye: { nakedVision: "0.3", correctedVision: "1.0", sphere: "-2.75", cylinder: "-0.50", axis: "180" },
-    leftEye: { nakedVision: "0.4", correctedVision: "1.0", sphere: "-2.25", cylinder: "-0.25", axis: "175" },
-    pd: "58mm",
-    cornealCurvature: { horizontal: "42.50D", vertical: "43.00D" },
+    rightEye: { nakedVision: "0.3", correctedVision: "1.0", sphere: "-2.75", cylinder: "-0.50", axis: "180", add: "" },
+    leftEye: { nakedVision: "0.4", correctedVision: "1.0", sphere: "-2.25", cylinder: "-0.25", axis: "175", add: "" },
+    pd: "58",
+    cornealCurvature: { right: { horizontal: "42.50", vertical: "43.00" }, left: { horizontal: "42.75", vertical: "43.25" } },
     recommendation: "近视进展较快，建议增加户外活动时间，考虑角膜塑形镜控制近视进展，3个月后复查。"
   },
   {
@@ -280,15 +286,15 @@ const refractionRecords: RefractionRecord[] = [
     patientNo: "Patient-081",
     category: "渐进片",
     type: "初配",
-    summary: "ADD +1.50，瞳高待确认",
+    summary: "ADD +1.50D，右眼+0.50DS/-0.75DC×90°，左眼+0.75DS/-1.00DC×85°，PD 63mm",
     patientName: "李建国",
     ageGroup: "中老年",
     gender: "男",
     examDate: "2026-04-20",
-    rightEye: { nakedVision: "0.6", correctedVision: "1.0", sphere: "+0.50", cylinder: "-0.75", axis: "90" },
-    leftEye: { nakedVision: "0.5", correctedVision: "1.0", sphere: "+0.75", cylinder: "-1.00", axis: "85" },
-    pd: "63mm",
-    cornealCurvature: { horizontal: "43.25D", vertical: "44.00D" },
+    rightEye: { nakedVision: "0.6", correctedVision: "1.0", sphere: "+0.50", cylinder: "-0.75", axis: "90", add: "+1.50" },
+    leftEye: { nakedVision: "0.5", correctedVision: "1.0", sphere: "+0.75", cylinder: "-1.00", axis: "85", add: "+1.50" },
+    pd: "63",
+    cornealCurvature: { right: { horizontal: "43.25", vertical: "44.00" }, left: { horizontal: "43.50", vertical: "44.25" } },
     recommendation: "ADD +1.50，渐进片初配需确认瞳高，建议选择短通道渐进片，2周后回访适应情况。"
   },
   {
@@ -296,15 +302,15 @@ const refractionRecords: RefractionRecord[] = [
     patientNo: "Patient-144",
     category: "散光",
     type: "复查",
-    summary: "柱镜变化0.50D",
+    summary: "右眼-1.50DS/-1.25DC×10°，左眼-1.75DS/-1.50DC×170°，PD 60mm",
     patientName: "王思雨",
     ageGroup: "青少年",
     gender: "女",
     examDate: "2026-06-01",
-    rightEye: { nakedVision: "0.5", correctedVision: "1.0", sphere: "-1.50", cylinder: "-1.25", axis: "10" },
-    leftEye: { nakedVision: "0.5", correctedVision: "1.0", sphere: "-1.75", cylinder: "-1.50", axis: "170" },
-    pd: "60mm",
-    cornealCurvature: { horizontal: "42.00D", vertical: "43.75D" },
+    rightEye: { nakedVision: "0.5", correctedVision: "1.0", sphere: "-1.50", cylinder: "-1.25", axis: "10", add: "" },
+    leftEye: { nakedVision: "0.5", correctedVision: "1.0", sphere: "-1.75", cylinder: "-1.50", axis: "170", add: "" },
+    pd: "60",
+    cornealCurvature: { right: { horizontal: "42.00", vertical: "43.75" }, left: { horizontal: "42.25", vertical: "44.00" } },
     recommendation: "柱镜较上次增加0.50D，散光变化需关注，建议半年后复查，注意用眼姿势。"
   }
 ];
@@ -413,6 +419,527 @@ function PatientForm({
         <button type="submit" className="primary-action">
           {initialData ? "保存修改" : "新增档案"}
         </button>
+      </div>
+    </form>
+  );
+}
+
+interface PrescriptionFormData {
+  patientNo: string;
+  patientName: string;
+  ageGroup: string;
+  gender: string;
+  examDate: string;
+  category: string;
+  type: string;
+  rightEye: EyeRefraction;
+  leftEye: EyeRefraction;
+  pd: string;
+  cornealCurvature: CornealCurvature;
+  recommendation: string;
+}
+
+const emptyEye: EyeRefraction = {
+  nakedVision: "",
+  correctedVision: "",
+  sphere: "",
+  cylinder: "",
+  axis: "",
+  add: ""
+};
+
+const emptyCurvature: EyeCurvature = { horizontal: "", vertical: "" };
+
+const emptyPrescriptionForm: PrescriptionFormData = {
+  patientNo: "",
+  patientName: "",
+  ageGroup: "",
+  gender: "",
+  examDate: formatLocalDate(new Date()),
+  category: "",
+  type: "初配",
+  rightEye: { ...emptyEye },
+  leftEye: { ...emptyEye },
+  pd: "",
+  cornealCurvature: { right: { ...emptyCurvature }, left: { ...emptyCurvature } },
+  recommendation: ""
+};
+
+const categories = ["儿童近视", "青少年近视", "成人近视", "远视", "散光", "老花", "渐进片", "角膜塑形镜", "其他"];
+const examTypes = ["初配", "复查", "换镜", "体检"];
+const genders = ["男", "女"];
+
+function isQuarterStep(value: string): boolean {
+  if (!value || value === "-" || value === "+") return true;
+  const num = parseFloat(value);
+  if (isNaN(num)) return false;
+  return Math.abs(num * 4 - Math.round(num * 4)) < 0.001;
+}
+
+interface FieldError {
+  message: string;
+}
+
+interface PrescriptionErrors {
+  patientNo?: FieldError;
+  patientName?: FieldError;
+  ageGroup?: FieldError;
+  gender?: FieldError;
+  examDate?: FieldError;
+  pd?: FieldError;
+  rightEye?: {
+    nakedVision?: FieldError;
+    correctedVision?: FieldError;
+    sphere?: FieldError;
+    cylinder?: FieldError;
+    axis?: FieldError;
+    add?: FieldError;
+  };
+  leftEye?: {
+    nakedVision?: FieldError;
+    correctedVision?: FieldError;
+    sphere?: FieldError;
+    cylinder?: FieldError;
+    axis?: FieldError;
+    add?: FieldError;
+  };
+  cornealCurvature?: {
+    right?: { horizontal?: FieldError; vertical?: FieldError };
+    left?: { horizontal?: FieldError; vertical?: FieldError };
+  };
+}
+
+function validateVision(value: string): FieldError | undefined {
+  if (!value.trim()) return { message: "必填" };
+  const num = parseFloat(value);
+  if (isNaN(num) || num <= 0 || num > 2.0) return { message: "范围0.01~2.0" };
+  return undefined;
+}
+
+function validateSphere(value: string): FieldError | undefined {
+  if (!value.trim()) return { message: "必填" };
+  const num = parseFloat(value);
+  if (isNaN(num)) return { message: "请输入数字" };
+  if (num < -20 || num > 20) return { message: "范围-20~+20D" };
+  if (!isQuarterStep(value)) return { message: "需0.25D步进" };
+  return undefined;
+}
+
+function validateCylinder(value: string): FieldError | undefined {
+  if (!value.trim()) return { message: "必填" };
+  const num = parseFloat(value);
+  if (isNaN(num)) return { message: "请输入数字" };
+  if (num < -10 || num > 10) return { message: "范围-10~+10D" };
+  if (!isQuarterStep(value)) return { message: "需0.25D步进" };
+  return undefined;
+}
+
+function validateAxis(value: string, hasCylinder: boolean): FieldError | undefined {
+  if (!hasCylinder && !value.trim()) return undefined;
+  if (hasCylinder && !value.trim()) return { message: "有柱镜时必填" };
+  if (!value.trim()) return undefined;
+  const num = parseFloat(value);
+  if (isNaN(num)) return { message: "请输入数字" };
+  if (num < 0 || num > 180) return { message: "范围0~180°" };
+  return undefined;
+}
+
+function validateAdd(value: string): FieldError | undefined {
+  if (!value.trim()) return undefined;
+  const num = parseFloat(value);
+  if (isNaN(num)) return { message: "请输入数字" };
+  if (num < 0 || num > 4) return { message: "范围0~+4.00D" };
+  if (!isQuarterStep(value)) return { message: "需0.25D步进" };
+  return undefined;
+}
+
+function validatePd(value: string): FieldError | undefined {
+  if (!value.trim()) return { message: "必填" };
+  const num = parseFloat(value);
+  if (isNaN(num)) return { message: "请输入数字" };
+  if (num < 40 || num > 80) return { message: "范围40~80mm" };
+  return undefined;
+}
+
+function validateCurvature(value: string): FieldError | undefined {
+  if (!value.trim()) return undefined;
+  const num = parseFloat(value);
+  if (isNaN(num)) return { message: "请输入数字" };
+  if (num < 35 || num > 50) return { message: "范围35~50D" };
+  if (!isQuarterStep(value)) return { message: "需0.25D步进" };
+  return undefined;
+}
+
+function PrescriptionForm({
+  onSubmit,
+  onCancel
+}: {
+  onSubmit: (record: Omit<RefractionRecord, "id" | "summary"> & { summary: string }) => void;
+  onCancel: () => void;
+}) {
+  const [formData, setFormData] = useState<PrescriptionFormData>(emptyPrescriptionForm);
+  const [errors, setErrors] = useState<PrescriptionErrors>({});
+
+  const setField = <K extends keyof PrescriptionFormData>(field: K, value: PrescriptionFormData[K]) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const setEyeField = (
+    eye: "rightEye" | "leftEye",
+    field: keyof EyeRefraction,
+    value: string
+  ) => {
+    setFormData(prev => ({
+      ...prev,
+      [eye]: { ...prev[eye], [field]: value }
+    }));
+  };
+
+  const setCurvatureField = (
+    eye: "right" | "left",
+    field: keyof EyeCurvature,
+    value: string
+  ) => {
+    setFormData(prev => ({
+      ...prev,
+      cornealCurvature: {
+        ...prev.cornealCurvature,
+        [eye]: { ...prev.cornealCurvature[eye], [field]: value }
+      }
+    }));
+  };
+
+  const validate = (): PrescriptionErrors => {
+    const newErrors: PrescriptionErrors = {};
+    if (!formData.patientNo.trim()) newErrors.patientNo = { message: "必填" };
+    if (!formData.patientName.trim()) newErrors.patientName = { message: "必填" };
+    if (!formData.ageGroup) newErrors.ageGroup = { message: "必选" };
+    if (!formData.gender) newErrors.gender = { message: "必选" };
+    if (!formData.examDate) newErrors.examDate = { message: "必选" };
+
+    const re = formData.rightEye;
+    const reErrors: PrescriptionErrors["rightEye"] = {};
+    const nv = validateVision(re.nakedVision); if (nv) reErrors.nakedVision = nv;
+    const cv = validateVision(re.correctedVision); if (cv) reErrors.correctedVision = cv;
+    const sp = validateSphere(re.sphere); if (sp) reErrors.sphere = sp;
+    const cy = validateCylinder(re.cylinder); if (cy) reErrors.cylinder = cy;
+    const ax = validateAxis(re.axis, !!re.cylinder.trim()); if (ax) reErrors.axis = ax;
+    const ad = validateAdd(re.add); if (ad) reErrors.add = ad;
+    if (Object.keys(reErrors).length > 0) newErrors.rightEye = reErrors;
+
+    const le = formData.leftEye;
+    const leErrors: PrescriptionErrors["leftEye"] = {};
+    const lnv = validateVision(le.nakedVision); if (lnv) leErrors.nakedVision = lnv;
+    const lcv = validateVision(le.correctedVision); if (lcv) leErrors.correctedVision = lcv;
+    const lsp = validateSphere(le.sphere); if (lsp) leErrors.sphere = lsp;
+    const lcy = validateCylinder(le.cylinder); if (lcy) leErrors.cylinder = lcy;
+    const lax = validateAxis(le.axis, !!le.cylinder.trim()); if (lax) leErrors.axis = lax;
+    const lad = validateAdd(le.add); if (lad) leErrors.add = lad;
+    if (Object.keys(leErrors).length > 0) newErrors.leftEye = leErrors;
+
+    const pdErr = validatePd(formData.pd); if (pdErr) newErrors.pd = pdErr;
+
+    const ccErrors: PrescriptionErrors["cornealCurvature"] = {};
+    const rch = validateCurvature(formData.cornealCurvature.right.horizontal);
+    const rcv = validateCurvature(formData.cornealCurvature.right.vertical);
+    const lch = validateCurvature(formData.cornealCurvature.left.horizontal);
+    const lcv2 = validateCurvature(formData.cornealCurvature.left.vertical);
+    if (rch || rcv) ccErrors.right = { horizontal: rch, vertical: rcv };
+    if (lch || lcv2) ccErrors.left = { horizontal: lch, vertical: lcv2 };
+    if (Object.keys(ccErrors).length > 0) newErrors.cornealCurvature = ccErrors;
+
+    return newErrors;
+  };
+
+  const generateSummary = (): string => {
+    const parts: string[] = [];
+    const addText = formData.rightEye.add ? `ADD ${formData.rightEye.add}D` : "";
+    if (addText) parts.push(addText);
+    const hasRCylinder = formData.rightEye.cylinder.trim() && parseFloat(formData.rightEye.cylinder) !== 0;
+    const reText = `右眼${formData.rightEye.sphere}DS${hasRCylinder ? `/${formData.rightEye.cylinder}DC×${formData.rightEye.axis}°` : ""}`;
+    parts.push(reText);
+    const hasLCylinder = formData.leftEye.cylinder.trim() && parseFloat(formData.leftEye.cylinder) !== 0;
+    const leText = `左眼${formData.leftEye.sphere}DS${hasLCylinder ? `/${formData.leftEye.cylinder}DC×${formData.leftEye.axis}°` : ""}`;
+    parts.push(leText);
+    parts.push(`PD ${formData.pd}mm`);
+    return parts.join("，");
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const validationErrors = validate();
+    setErrors(validationErrors);
+    if (Object.keys(validationErrors).length > 0) return;
+
+    const summary = generateSummary();
+    onSubmit({
+      patientNo: formData.patientNo,
+      category: formData.category || formData.ageGroup,
+      type: formData.type,
+      summary,
+      patientName: formData.patientName,
+      ageGroup: formData.ageGroup,
+      gender: formData.gender,
+      examDate: formData.examDate,
+      rightEye: formData.rightEye,
+      leftEye: formData.leftEye,
+      pd: formData.pd,
+      cornealCurvature: formData.cornealCurvature,
+      recommendation: formData.recommendation
+    });
+    setFormData(emptyPrescriptionForm);
+    setErrors({});
+  };
+
+  const EyeBlock = ({ eye, title, eyeErrors }: {
+    eye: "rightEye" | "leftEye";
+    title: string;
+    eyeErrors: PrescriptionErrors["rightEye"];
+  }) => {
+    const data = formData[eye];
+    const err = eyeErrors || {};
+    return (
+      <div className="eye-block">
+        <div className="eye-block-title">{title}</div>
+        <div className="eye-fields-grid">
+          <label className={err.nakedVision ? "field-error" : ""}>
+            <span>裸眼视力</span>
+            <input
+              type="text"
+              placeholder="如 0.3"
+              value={data.nakedVision}
+              onChange={e => setEyeField(eye, "nakedVision", e.target.value)}
+            />
+            {err.nakedVision && <em>{err.nakedVision.message}</em>}
+          </label>
+          <label className={err.correctedVision ? "field-error" : ""}>
+            <span>矫正视力</span>
+            <input
+              type="text"
+              placeholder="如 1.0"
+              value={data.correctedVision}
+              onChange={e => setEyeField(eye, "correctedVision", e.target.value)}
+            />
+            {err.correctedVision && <em>{err.correctedVision.message}</em>}
+          </label>
+          <label className={err.sphere ? "field-error" : ""}>
+            <span>球镜 (DS)</span>
+            <input
+              type="text"
+              placeholder="如 -2.75"
+              value={data.sphere}
+              onChange={e => setEyeField(eye, "sphere", e.target.value)}
+            />
+            {err.sphere && <em>{err.sphere.message}</em>}
+          </label>
+          <label className={err.cylinder ? "field-error" : ""}>
+            <span>柱镜 (DC)</span>
+            <input
+              type="text"
+              placeholder="如 -0.50"
+              value={data.cylinder}
+              onChange={e => setEyeField(eye, "cylinder", e.target.value)}
+            />
+            {err.cylinder && <em>{err.cylinder.message}</em>}
+          </label>
+          <label className={err.axis ? "field-error" : ""}>
+            <span>轴位 (°)</span>
+            <input
+              type="text"
+              placeholder="如 180"
+              value={data.axis}
+              onChange={e => setEyeField(eye, "axis", e.target.value)}
+            />
+            {err.axis && <em>{err.axis.message}</em>}
+          </label>
+          <label className={err.add ? "field-error" : ""}>
+            <span>ADD (D)</span>
+            <input
+              type="text"
+              placeholder="老花/渐进时填，如 +1.50"
+              value={data.add}
+              onChange={e => setEyeField(eye, "add", e.target.value)}
+            />
+            {err.add && <em>{err.add.message}</em>}
+          </label>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <form className="prescription-form" onSubmit={handleSubmit}>
+      <div className="form-section">
+        <div className="form-section-title">基础信息</div>
+        <div className="form-row">
+          <label className={errors.patientNo ? "field-error" : ""}>
+            <span>患者编号 *</span>
+            <input
+              type="text"
+              placeholder="如 Patient-100"
+              value={formData.patientNo}
+              onChange={e => setField("patientNo", e.target.value)}
+            />
+            {errors.patientNo && <em>{errors.patientNo.message}</em>}
+          </label>
+          <label className={errors.patientName ? "field-error" : ""}>
+            <span>患者姓名 *</span>
+            <input
+              type="text"
+              placeholder="如 张小明"
+              value={formData.patientName}
+              onChange={e => setField("patientName", e.target.value)}
+            />
+            {errors.patientName && <em>{errors.patientName.message}</em>}
+          </label>
+        </div>
+        <div className="form-row">
+          <label className={errors.ageGroup ? "field-error" : ""}>
+            <span>年龄段 *</span>
+            <select
+              value={formData.ageGroup}
+              onChange={e => setField("ageGroup", e.target.value)}
+            >
+              <option value="">请选择</option>
+              {ageGroups.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+            {errors.ageGroup && <em>{errors.ageGroup.message}</em>}
+          </label>
+          <label className={errors.gender ? "field-error" : ""}>
+            <span>性别 *</span>
+            <select
+              value={formData.gender}
+              onChange={e => setField("gender", e.target.value)}
+            >
+              <option value="">请选择</option>
+              {genders.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+            {errors.gender && <em>{errors.gender.message}</em>}
+          </label>
+        </div>
+        <div className="form-row">
+          <label className={errors.examDate ? "field-error" : ""}>
+            <span>检查日期 *</span>
+            <input
+              type="date"
+              value={formData.examDate}
+              onChange={e => setField("examDate", e.target.value)}
+            />
+            {errors.examDate && <em>{errors.examDate.message}</em>}
+          </label>
+          <label>
+            <span>类型</span>
+            <select
+              value={formData.type}
+              onChange={e => setField("type", e.target.value)}
+            >
+              {examTypes.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="form-row">
+          <label>
+            <span>分类（可选）</span>
+            <select
+              value={formData.category}
+              onChange={e => setField("category", e.target.value)}
+            >
+              <option value="">（自动根据年龄判断）</option>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+          <label className={errors.pd ? "field-error" : ""}>
+            <span>瞳距 PD (mm) *</span>
+            <input
+              type="text"
+              placeholder="如 58"
+              value={formData.pd}
+              onChange={e => setField("pd", e.target.value)}
+            />
+            {errors.pd && <em>{errors.pd.message}</em>}
+          </label>
+        </div>
+      </div>
+
+      <div className="form-section">
+        <div className="form-section-title">屈光参数（必填）</div>
+        <div className="eyes-row">
+          <EyeBlock eye="rightEye" title="右眼 (OD)" eyeErrors={errors.rightEye} />
+          <EyeBlock eye="leftEye" title="左眼 (OS)" eyeErrors={errors.leftEye} />
+        </div>
+      </div>
+
+      <div className="form-section">
+        <div className="form-section-title">角膜曲率（可选，35~50D，0.25D步进）</div>
+        <div className="eyes-row">
+          <div className="eye-block">
+            <div className="eye-block-title">右眼 (OD)</div>
+            <div className="eye-fields-grid">
+              <label className={errors.cornealCurvature?.right?.horizontal ? "field-error" : ""}>
+                <span>水平曲率 (D)</span>
+                <input
+                  type="text"
+                  placeholder="如 42.50"
+                  value={formData.cornealCurvature.right.horizontal}
+                  onChange={e => setCurvatureField("right", "horizontal", e.target.value)}
+                />
+                {errors.cornealCurvature?.right?.horizontal && <em>{errors.cornealCurvature.right.horizontal.message}</em>}
+              </label>
+              <label className={errors.cornealCurvature?.right?.vertical ? "field-error" : ""}>
+                <span>垂直曲率 (D)</span>
+                <input
+                  type="text"
+                  placeholder="如 43.00"
+                  value={formData.cornealCurvature.right.vertical}
+                  onChange={e => setCurvatureField("right", "vertical", e.target.value)}
+                />
+                {errors.cornealCurvature?.right?.vertical && <em>{errors.cornealCurvature.right.vertical.message}</em>}
+              </label>
+            </div>
+          </div>
+          <div className="eye-block">
+            <div className="eye-block-title">左眼 (OS)</div>
+            <div className="eye-fields-grid">
+              <label className={errors.cornealCurvature?.left?.horizontal ? "field-error" : ""}>
+                <span>水平曲率 (D)</span>
+                <input
+                  type="text"
+                  placeholder="如 42.75"
+                  value={formData.cornealCurvature.left.horizontal}
+                  onChange={e => setCurvatureField("left", "horizontal", e.target.value)}
+                />
+                {errors.cornealCurvature?.left?.horizontal && <em>{errors.cornealCurvature.left.horizontal.message}</em>}
+              </label>
+              <label className={errors.cornealCurvature?.left?.vertical ? "field-error" : ""}>
+                <span>垂直曲率 (D)</span>
+                <input
+                  type="text"
+                  placeholder="如 43.25"
+                  value={formData.cornealCurvature.left.vertical}
+                  onChange={e => setCurvatureField("left", "vertical", e.target.value)}
+                />
+                {errors.cornealCurvature?.left?.vertical && <em>{errors.cornealCurvature.left.vertical.message}</em>}
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="form-section">
+        <div className="form-section-title">验配建议（可选）</div>
+        <label>
+          <textarea
+            placeholder="填写验配建议，如近视控制方案、复查周期等..."
+            value={formData.recommendation}
+            onChange={e => setField("recommendation", e.target.value)}
+            rows={3}
+          />
+        </label>
+      </div>
+
+      <div className="form-actions">
+        <button type="button" className="ghost-btn" onClick={() => { setFormData(emptyPrescriptionForm); setErrors({}); onCancel(); }}>取消</button>
+        <button type="submit" className="primary-action">生成记录并加入列表</button>
       </div>
     </form>
   );
@@ -586,6 +1113,10 @@ function RefractionDrawer({
                       <span className="drawer-label">轴位</span>
                       <span className="drawer-value">{record.rightEye.axis}°</span>
                     </div>
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">ADD</span>
+                      <span className="drawer-value">{record.rightEye.add ? record.rightEye.add + "D" : "—"}</span>
+                    </div>
                   </div>
                 </div>
                 <div className="drawer-eye-block">
@@ -611,6 +1142,10 @@ function RefractionDrawer({
                       <span className="drawer-label">轴位</span>
                       <span className="drawer-value">{record.leftEye.axis}°</span>
                     </div>
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">ADD</span>
+                      <span className="drawer-value">{record.leftEye.add ? record.leftEye.add + "D" : "—"}</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -621,21 +1156,39 @@ function RefractionDrawer({
               <div className="drawer-info-grid">
                 <div className="drawer-info-item">
                   <span className="drawer-label">瞳距 (PD)</span>
-                  <span className="drawer-value drawer-value-lg">{record.pd}</span>
+                  <span className="drawer-value drawer-value-lg">{record.pd}mm</span>
                 </div>
               </div>
             </section>
 
             <section className="drawer-section">
               <h3>角膜曲率</h3>
-              <div className="drawer-info-grid">
-                <div className="drawer-info-item">
-                  <span className="drawer-label">水平曲率</span>
-                  <span className="drawer-value">{record.cornealCurvature.horizontal}</span>
+              <div className="drawer-eye-tables">
+                <div className="drawer-eye-block">
+                  <p className="drawer-eye-title">右眼 (OD)</p>
+                  <div className="drawer-param-grid">
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">水平曲率</span>
+                      <span className="drawer-value">{record.cornealCurvature.right.horizontal}D</span>
+                    </div>
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">垂直曲率</span>
+                      <span className="drawer-value">{record.cornealCurvature.right.vertical}D</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="drawer-info-item">
-                  <span className="drawer-label">垂直曲率</span>
-                  <span className="drawer-value">{record.cornealCurvature.vertical}</span>
+                <div className="drawer-eye-block">
+                  <p className="drawer-eye-title">左眼 (OS)</p>
+                  <div className="drawer-param-grid">
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">水平曲率</span>
+                      <span className="drawer-value">{record.cornealCurvature.left.horizontal}D</span>
+                    </div>
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">垂直曲率</span>
+                      <span className="drawer-value">{record.cornealCurvature.left.vertical}D</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>
@@ -663,6 +1216,8 @@ function App() {
   const [today] = useState(() => new Date());
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<RefractionRecord | null>(null);
+  const [records, setRecords] = useState<RefractionRecord[]>(refractionRecords);
+  const [showPrescriptionForm, setShowPrescriptionForm] = useState(false);
 
   const openDrawer = (record: RefractionRecord) => {
     setSelectedRecord(record);
@@ -740,6 +1295,23 @@ function App() {
 
   const cancelAdd = () => {
     setShowForm(false);
+  };
+
+  const openPrescriptionForm = () => {
+    setShowPrescriptionForm(true);
+  };
+
+  const cancelPrescriptionForm = () => {
+    setShowPrescriptionForm(false);
+  };
+
+  const handlePrescriptionSubmit = (data: Omit<RefractionRecord, "id" | "summary"> & { summary: string }) => {
+    const newRecord: RefractionRecord = {
+      id: `r-${Date.now()}`,
+      ...data
+    };
+    setRecords(prev => [newRecord, ...prev]);
+    setShowPrescriptionForm(false);
   };
 
   const editingPatient = patients.find(p => p.id === editingId);
@@ -852,13 +1424,13 @@ function App() {
               <p>{project.domain}</p>
               <h2>记录字段</h2>
             </div>
-            <button className="primary-action">新增记录</button>
+            <button className="primary-action" onClick={openPrescriptionForm}>新增处方记录</button>
           </div>
           <div className="field-grid">
             {project.fields.map((field: string) => (
               <label key={field}>
                 <span>{field}</span>
-                <input placeholder={"填写" + field} />
+                <input placeholder={"填写" + field + " · 请使用上方新增处方"} readOnly />
               </label>
             ))}
           </div>
@@ -869,13 +1441,26 @@ function App() {
         <section className="records panel">
           <div className="section-heading">
             <div>
-              <p>示例数据</p>
+              <p>验光记录</p>
               <h2>近期记录</h2>
             </div>
-            <button>导出摘要</button>
+            <div className="record-actions">
+              {!showPrescriptionForm && (
+                <button className="primary-action" onClick={openPrescriptionForm}>+ 新增处方录入</button>
+              )}
+              <button>导出摘要</button>
+            </div>
           </div>
+
+          {showPrescriptionForm && (
+            <PrescriptionForm
+              onSubmit={handlePrescriptionSubmit}
+              onCancel={cancelPrescriptionForm}
+            />
+          )}
+
           <div className="record-list">
-            {refractionRecords.map((record, index) => (
+            {records.map((record, index) => (
               <article
                 key={record.id}
                 className="record-card record-clickable"
@@ -883,11 +1468,17 @@ function App() {
               >
                 <div className="record-index">{String(index + 1).padStart(2, "0")}</div>
                 <div>
-                  <h3>{record.patientNo}</h3>
-                  <p>{[record.category, record.type, record.summary].join(" · ")}</p>
+                  <h3>{record.patientNo} · {record.patientName} · {record.examDate}</h3>
+                  <p>{[record.category, record.type, record.summary].filter(Boolean).join(" · ")}</p>
                 </div>
               </article>
             ))}
+            {records.length === 0 && (
+              <div className="empty-state">
+                <p>暂无验光记录</p>
+                <p className="empty-hint">点击"新增处方录入"添加第一条记录</p>
+              </div>
+            )}
           </div>
         </section>
 
