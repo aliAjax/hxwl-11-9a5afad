@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import "./styles.css";
 
 interface PatientProfile {
@@ -11,6 +11,36 @@ interface PatientProfile {
 }
 
 type ReminderStatus = "overdue" | "upcoming" | "normal";
+
+interface EyeRefraction {
+  nakedVision: string;
+  correctedVision: string;
+  sphere: string;
+  cylinder: string;
+  axis: string;
+}
+
+interface CornealCurvature {
+  horizontal: string;
+  vertical: string;
+}
+
+interface RefractionRecord {
+  id: string;
+  patientNo: string;
+  category: string;
+  type: string;
+  summary: string;
+  patientName: string;
+  ageGroup: string;
+  gender: string;
+  examDate: string;
+  rightEye: EyeRefraction;
+  leftEye: EyeRefraction;
+  pd: string;
+  cornealCurvature: CornealCurvature;
+  recommendation: string;
+}
 
 interface PatientReminder extends PatientProfile {
   reminderStatus: ReminderStatus;
@@ -225,28 +255,59 @@ const project = {
     "轴位",
     "瞳距",
     "角膜曲率"
-  ],
-  "records": [
-    [
-      "Patient-032",
-      "儿童近视",
-      "复查",
-      "右眼-2.75DS，轴位180"
-    ],
-    [
-      "Patient-081",
-      "渐进片",
-      "初配",
-      "ADD +1.50，瞳高待确认"
-    ],
-    [
-      "Patient-144",
-      "散光",
-      "复查",
-      "柱镜变化0.50D"
-    ]
   ]
 };
+
+const refractionRecords: RefractionRecord[] = [
+  {
+    id: "r-001",
+    patientNo: "Patient-032",
+    category: "儿童近视",
+    type: "复查",
+    summary: "右眼-2.75DS，轴位180",
+    patientName: "张小明",
+    ageGroup: "儿童",
+    gender: "男",
+    examDate: "2026-05-15",
+    rightEye: { nakedVision: "0.3", correctedVision: "1.0", sphere: "-2.75", cylinder: "-0.50", axis: "180" },
+    leftEye: { nakedVision: "0.4", correctedVision: "1.0", sphere: "-2.25", cylinder: "-0.25", axis: "175" },
+    pd: "58mm",
+    cornealCurvature: { horizontal: "42.50D", vertical: "43.00D" },
+    recommendation: "近视进展较快，建议增加户外活动时间，考虑角膜塑形镜控制近视进展，3个月后复查。"
+  },
+  {
+    id: "r-002",
+    patientNo: "Patient-081",
+    category: "渐进片",
+    type: "初配",
+    summary: "ADD +1.50，瞳高待确认",
+    patientName: "李建国",
+    ageGroup: "中老年",
+    gender: "男",
+    examDate: "2026-04-20",
+    rightEye: { nakedVision: "0.6", correctedVision: "1.0", sphere: "+0.50", cylinder: "-0.75", axis: "90" },
+    leftEye: { nakedVision: "0.5", correctedVision: "1.0", sphere: "+0.75", cylinder: "-1.00", axis: "85" },
+    pd: "63mm",
+    cornealCurvature: { horizontal: "43.25D", vertical: "44.00D" },
+    recommendation: "ADD +1.50，渐进片初配需确认瞳高，建议选择短通道渐进片，2周后回访适应情况。"
+  },
+  {
+    id: "r-003",
+    patientNo: "Patient-144",
+    category: "散光",
+    type: "复查",
+    summary: "柱镜变化0.50D",
+    patientName: "王思雨",
+    ageGroup: "青少年",
+    gender: "女",
+    examDate: "2026-06-01",
+    rightEye: { nakedVision: "0.5", correctedVision: "1.0", sphere: "-1.50", cylinder: "-1.25", axis: "10" },
+    leftEye: { nakedVision: "0.5", correctedVision: "1.0", sphere: "-1.75", cylinder: "-1.50", axis: "170" },
+    pd: "60mm",
+    cornealCurvature: { horizontal: "42.00D", vertical: "43.75D" },
+    recommendation: "柱镜较上次增加0.50D，散光变化需关注，建议半年后复查，注意用眼姿势。"
+  }
+];
 
 const statusColors = ["status-ok", "status-watch", "status-danger"];
 
@@ -430,11 +491,187 @@ function ReminderCard({
   );
 }
 
+function RefractionDrawer({
+  record,
+  open,
+  onClose
+}: {
+  record: RefractionRecord | null;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    },
+    [onClose]
+  );
+
+  useEffect(() => {
+    if (open) {
+      document.addEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = "hidden";
+    }
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = "";
+    };
+  }, [open, handleKeyDown]);
+
+  if (!open) return null;
+
+  return (
+    <div className="drawer-overlay" onClick={onClose}>
+      <aside className="drawer-panel" onClick={e => e.stopPropagation()}>
+        <div className="drawer-header">
+          <h2>验光记录详情</h2>
+          <button className="drawer-close" onClick={onClose}>✕</button>
+        </div>
+
+        {record ? (
+          <div className="drawer-body">
+            <section className="drawer-section">
+              <h3>患者基础信息</h3>
+              <div className="drawer-info-grid">
+                <div className="drawer-info-item">
+                  <span className="drawer-label">患者编号</span>
+                  <span className="drawer-value">{record.patientNo}</span>
+                </div>
+                <div className="drawer-info-item">
+                  <span className="drawer-label">姓名</span>
+                  <span className="drawer-value">{record.patientName}</span>
+                </div>
+                <div className="drawer-info-item">
+                  <span className="drawer-label">年龄段</span>
+                  <span className="drawer-value">{record.ageGroup}</span>
+                </div>
+                <div className="drawer-info-item">
+                  <span className="drawer-label">性别</span>
+                  <span className="drawer-value">{record.gender}</span>
+                </div>
+                <div className="drawer-info-item">
+                  <span className="drawer-label">检查日期</span>
+                  <span className="drawer-value">{record.examDate}</span>
+                </div>
+                <div className="drawer-info-item">
+                  <span className="drawer-label">类型</span>
+                  <span className="drawer-value">{record.type}</span>
+                </div>
+              </div>
+            </section>
+
+            <section className="drawer-section">
+              <h3>屈光参数</h3>
+              <div className="drawer-eye-tables">
+                <div className="drawer-eye-block">
+                  <p className="drawer-eye-title">右眼 (OD)</p>
+                  <div className="drawer-param-grid">
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">裸眼视力</span>
+                      <span className="drawer-value">{record.rightEye.nakedVision}</span>
+                    </div>
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">矫正视力</span>
+                      <span className="drawer-value">{record.rightEye.correctedVision}</span>
+                    </div>
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">球镜</span>
+                      <span className="drawer-value">{record.rightEye.sphere}D</span>
+                    </div>
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">柱镜</span>
+                      <span className="drawer-value">{record.rightEye.cylinder}D</span>
+                    </div>
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">轴位</span>
+                      <span className="drawer-value">{record.rightEye.axis}°</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="drawer-eye-block">
+                  <p className="drawer-eye-title">左眼 (OS)</p>
+                  <div className="drawer-param-grid">
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">裸眼视力</span>
+                      <span className="drawer-value">{record.leftEye.nakedVision}</span>
+                    </div>
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">矫正视力</span>
+                      <span className="drawer-value">{record.leftEye.correctedVision}</span>
+                    </div>
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">球镜</span>
+                      <span className="drawer-value">{record.leftEye.sphere}D</span>
+                    </div>
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">柱镜</span>
+                      <span className="drawer-value">{record.leftEye.cylinder}D</span>
+                    </div>
+                    <div className="drawer-param-item">
+                      <span className="drawer-label">轴位</span>
+                      <span className="drawer-value">{record.leftEye.axis}°</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="drawer-section">
+              <h3>瞳距</h3>
+              <div className="drawer-info-grid">
+                <div className="drawer-info-item">
+                  <span className="drawer-label">瞳距 (PD)</span>
+                  <span className="drawer-value drawer-value-lg">{record.pd}</span>
+                </div>
+              </div>
+            </section>
+
+            <section className="drawer-section">
+              <h3>角膜曲率</h3>
+              <div className="drawer-info-grid">
+                <div className="drawer-info-item">
+                  <span className="drawer-label">水平曲率</span>
+                  <span className="drawer-value">{record.cornealCurvature.horizontal}</span>
+                </div>
+                <div className="drawer-info-item">
+                  <span className="drawer-label">垂直曲率</span>
+                  <span className="drawer-value">{record.cornealCurvature.vertical}</span>
+                </div>
+              </div>
+            </section>
+
+            <section className="drawer-section">
+              <h3>验配建议</h3>
+              <p className="drawer-recommendation">{record.recommendation}</p>
+            </section>
+          </div>
+        ) : (
+          <div className="drawer-empty">
+            <p>暂无验光记录数据</p>
+            <p className="empty-hint">请选择一条近期记录查看详情</p>
+          </div>
+        )}
+      </aside>
+    </div>
+  );
+}
+
 function App() {
   const [patients, setPatients] = useState<PatientProfile[]>(initialPatients);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [today] = useState(() => new Date());
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState<RefractionRecord | null>(null);
+
+  const openDrawer = (record: RefractionRecord) => {
+    setSelectedRecord(record);
+    setDrawerOpen(true);
+  };
+
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+  };
 
   const reminders = useMemo(() => {
     return patients
@@ -638,12 +875,16 @@ function App() {
             <button>导出摘要</button>
           </div>
           <div className="record-list">
-            {project.records.map((record: string[], index: number) => (
-              <article key={record.join("-")} className="record-card">
+            {refractionRecords.map((record, index) => (
+              <article
+                key={record.id}
+                className="record-card record-clickable"
+                onClick={() => openDrawer(record)}
+              >
                 <div className="record-index">{String(index + 1).padStart(2, "0")}</div>
                 <div>
-                  <h3>{record[0]}</h3>
-                  <p>{record.slice(1).join(" · ")}</p>
+                  <h3>{record.patientNo}</h3>
+                  <p>{[record.category, record.type, record.summary].join(" · ")}</p>
                 </div>
               </article>
             ))}
@@ -708,6 +949,12 @@ function App() {
           </div>
         </section>
       </section>
+
+      <RefractionDrawer
+        record={selectedRecord}
+        open={drawerOpen}
+        onClose={closeDrawer}
+      />
     </main>
   );
 }
