@@ -387,6 +387,7 @@ function App() {
 
           {showForm && (
             <PatientForm
+              key="add-form"
               onSubmit={handleAdd}
               onCancel={cancelAdd}
             />
@@ -396,6 +397,7 @@ function App() {
             <div className="editing-form">
               <p className="form-title">编辑档案</p>
               <PatientForm
+                key={editingPatient.id}
                 initialData={{
                   patientNo: editingPatient.patientNo,
                   ageGroup: editingPatient.ageGroup,
