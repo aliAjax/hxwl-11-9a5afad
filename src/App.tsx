@@ -39,20 +39,37 @@ const REMINDER_CYCLES: Record<string, number> = {
 
 const DEFAULT_CYCLE = 90;
 const UPCOMING_THRESHOLD = 7;
+const DAY_IN_MS = 1000 * 60 * 60 * 24;
 
 function getReminderCycle(ageGroup: string, lensType: string): number {
   const key = `${ageGroup}-${lensType}`;
   return REMINDER_CYCLES[key] || DEFAULT_CYCLE;
 }
 
+function parseLocalDate(dateString: string): Date {
+  const [year, month, day] = dateString.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function calculateReminder(patient: PatientProfile, today: Date): PatientReminder {
   const cycleDays = getReminderCycle(patient.ageGroup, patient.lensType);
-  const lastCheck = new Date(patient.lastCheckDate);
+  const lastCheck = parseLocalDate(patient.lastCheckDate);
   const nextCheck = new Date(lastCheck);
   nextCheck.setDate(lastCheck.getDate() + cycleDays);
 
-  const diffTime = nextCheck.getTime() - today.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const diffTime = nextCheck.getTime() - startOfLocalDay(today).getTime();
+  const diffDays = Math.round(diffTime / DAY_IN_MS);
 
   let status: ReminderStatus;
   if (diffDays < 0) {
@@ -66,7 +83,7 @@ function calculateReminder(patient: PatientProfile, today: Date): PatientReminde
   return {
     ...patient,
     reminderStatus: status,
-    nextCheckDate: nextCheck.toISOString().split("T")[0],
+    nextCheckDate: formatLocalDate(nextCheck),
     daysUntilNext: diffDays,
     reminderCycle: cycleDays,
   };
@@ -516,7 +533,7 @@ function App() {
             <p>复查管理</p>
             <h2>复查提醒看板</h2>
           </div>
-          <span className="today-info">今日日期：{today.toISOString().split("T")[0]}</span>
+          <span className="today-info">今日日期：{formatLocalDate(today)}</span>
         </div>
         <div className="reminder-columns">
           <div className="reminder-column">
