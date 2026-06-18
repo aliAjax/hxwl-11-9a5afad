@@ -469,10 +469,34 @@ const categories = ["儿童近视", "青少年近视", "成人近视", "远视",
 const examTypes = ["初配", "复查", "换镜", "体检"];
 const genders = ["男", "女"];
 
-function isQuarterStep(value: string): boolean {
-  if (!value || value === "-" || value === "+") return true;
+const NUMBER_REGEX = /^[+-]?\d+(\.\d+)?$/;
+const POSITIVE_NUMBER_REGEX = /^\d+(\.\d+)?$/;
+
+function isValidNumberFormat(value: string, allowSign: boolean = true): boolean {
+  if (!value.trim()) return false;
+  const regex = allowSign ? NUMBER_REGEX : POSITIVE_NUMBER_REGEX;
+  return regex.test(value.trim());
+}
+
+function parseSafeNumber(value: string): number | null {
+  if (!isValidNumberFormat(value)) return null;
   const num = parseFloat(value);
-  if (isNaN(num)) return false;
+  return isNaN(num) ? null : num;
+}
+
+function cleanNumber(value: string, allowSign: boolean = true): string {
+  if (allowSign) {
+    return value.replace(/[^0-9.+\-]/g, "").replace(/(?!^)[+-]/g, "").replace(/(\..*)\./g, "$1");
+  } else {
+    return value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+  }
+}
+
+function isQuarterStep(value: string): boolean {
+  if (!value || value === "-" || value === "+" || value === "." || value === "-." || value === "+.") return true;
+  if (!isValidNumberFormat(value)) return false;
+  const num = parseSafeNumber(value);
+  if (num === null) return false;
   return Math.abs(num * 4 - Math.round(num * 4)) < 0.001;
 }
 
@@ -511,15 +535,17 @@ interface PrescriptionErrors {
 
 function validateVision(value: string): FieldError | undefined {
   if (!value.trim()) return { message: "必填" };
-  const num = parseFloat(value);
-  if (isNaN(num) || num <= 0 || num > 2.0) return { message: "范围0.01~2.0" };
+  if (!isValidNumberFormat(value, false)) return { message: "请输入正数" };
+  const num = parseSafeNumber(value);
+  if (num === null || num <= 0 || num > 2.0) return { message: "范围0.01~2.0" };
   return undefined;
 }
 
 function validateSphere(value: string): FieldError | undefined {
   if (!value.trim()) return { message: "必填" };
-  const num = parseFloat(value);
-  if (isNaN(num)) return { message: "请输入数字" };
+  if (!isValidNumberFormat(value, true)) return { message: "请输入有效数字" };
+  const num = parseSafeNumber(value);
+  if (num === null) return { message: "请输入有效数字" };
   if (num < -20 || num > 20) return { message: "范围-20~+20D" };
   if (!isQuarterStep(value)) return { message: "需0.25D步进" };
   return undefined;
@@ -527,8 +553,9 @@ function validateSphere(value: string): FieldError | undefined {
 
 function validateCylinder(value: string): FieldError | undefined {
   if (!value.trim()) return { message: "必填" };
-  const num = parseFloat(value);
-  if (isNaN(num)) return { message: "请输入数字" };
+  if (!isValidNumberFormat(value, true)) return { message: "请输入有效数字" };
+  const num = parseSafeNumber(value);
+  if (num === null) return { message: "请输入有效数字" };
   if (num < -10 || num > 10) return { message: "范围-10~+10D" };
   if (!isQuarterStep(value)) return { message: "需0.25D步进" };
   return undefined;
@@ -538,16 +565,19 @@ function validateAxis(value: string, hasCylinder: boolean): FieldError | undefin
   if (!hasCylinder && !value.trim()) return undefined;
   if (hasCylinder && !value.trim()) return { message: "有柱镜时必填" };
   if (!value.trim()) return undefined;
-  const num = parseFloat(value);
-  if (isNaN(num)) return { message: "请输入数字" };
+  if (!isValidNumberFormat(value, false)) return { message: "请输入正整数" };
+  const num = parseSafeNumber(value);
+  if (num === null) return { message: "请输入有效数字" };
   if (num < 0 || num > 180) return { message: "范围0~180°" };
+  if (Math.floor(num) !== num) return { message: "轴位需为整数" };
   return undefined;
 }
 
 function validateAdd(value: string): FieldError | undefined {
   if (!value.trim()) return undefined;
-  const num = parseFloat(value);
-  if (isNaN(num)) return { message: "请输入数字" };
+  if (!isValidNumberFormat(value, true)) return { message: "请输入有效数字" };
+  const num = parseSafeNumber(value);
+  if (num === null) return { message: "请输入有效数字" };
   if (num < 0 || num > 4) return { message: "范围0~+4.00D" };
   if (!isQuarterStep(value)) return { message: "需0.25D步进" };
   return undefined;
@@ -555,16 +585,18 @@ function validateAdd(value: string): FieldError | undefined {
 
 function validatePd(value: string): FieldError | undefined {
   if (!value.trim()) return { message: "必填" };
-  const num = parseFloat(value);
-  if (isNaN(num)) return { message: "请输入数字" };
+  if (!isValidNumberFormat(value, false)) return { message: "请输入正数" };
+  const num = parseSafeNumber(value);
+  if (num === null) return { message: "请输入有效数字" };
   if (num < 40 || num > 80) return { message: "范围40~80mm" };
   return undefined;
 }
 
 function validateCurvature(value: string): FieldError | undefined {
   if (!value.trim()) return undefined;
-  const num = parseFloat(value);
-  if (isNaN(num)) return { message: "请输入数字" };
+  if (!isValidNumberFormat(value, false)) return { message: "请输入正数" };
+  const num = parseSafeNumber(value);
+  if (num === null) return { message: "请输入有效数字" };
   if (num < 35 || num > 50) return { message: "范围35~50D" };
   if (!isQuarterStep(value)) return { message: "需0.25D步进" };
   return undefined;
@@ -581,6 +613,9 @@ function PrescriptionForm({
   const [errors, setErrors] = useState<PrescriptionErrors>({});
 
   const setField = <K extends keyof PrescriptionFormData>(field: K, value: PrescriptionFormData[K]) => {
+    if (field === "pd") {
+      value = cleanNumber(value as string, false) as PrescriptionFormData[K];
+    }
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -589,9 +624,17 @@ function PrescriptionForm({
     field: keyof EyeRefraction,
     value: string
   ) => {
+    let cleaned = value;
+    if (field === "sphere" || field === "cylinder" || field === "add") {
+      cleaned = cleanNumber(value, true);
+    } else if (field === "nakedVision" || field === "correctedVision") {
+      cleaned = cleanNumber(value, false);
+    } else if (field === "axis") {
+      cleaned = value.replace(/[^0-9]/g, "");
+    }
     setFormData(prev => ({
       ...prev,
-      [eye]: { ...prev[eye], [field]: value }
+      [eye]: { ...prev[eye], [field]: cleaned }
     }));
   };
 
@@ -600,11 +643,12 @@ function PrescriptionForm({
     field: keyof EyeCurvature,
     value: string
   ) => {
+    const cleaned = cleanNumber(value, false);
     setFormData(prev => ({
       ...prev,
       cornealCurvature: {
         ...prev.cornealCurvature,
-        [eye]: { ...prev.cornealCurvature[eye], [field]: value }
+        [eye]: { ...prev.cornealCurvature[eye], [field]: cleaned }
       }
     }));
   };
@@ -651,19 +695,46 @@ function PrescriptionForm({
     return newErrors;
   };
 
+  const formatNumber = (value: string, decimals: number = 2): string => {
+    const num = parseSafeNumber(value);
+    if (num === null) return value;
+    return num.toFixed(decimals);
+  };
+
   const generateSummary = (): string => {
     const parts: string[] = [];
-    const addText = formData.rightEye.add ? `ADD ${formData.rightEye.add}D` : "";
-    if (addText) parts.push(addText);
-    const hasRCylinder = formData.rightEye.cylinder.trim() && parseFloat(formData.rightEye.cylinder) !== 0;
-    const reText = `右眼${formData.rightEye.sphere}DS${hasRCylinder ? `/${formData.rightEye.cylinder}DC×${formData.rightEye.axis}°` : ""}`;
+    const reAddNum = parseSafeNumber(formData.rightEye.add);
+    if (reAddNum !== null && reAddNum > 0) {
+      parts.push(`ADD ${formatNumber(formData.rightEye.add)}D`);
+    }
+    const reSphere = formatNumber(formData.rightEye.sphere);
+    const reCylNum = parseSafeNumber(formData.rightEye.cylinder);
+    const hasRCylinder = reCylNum !== null && reCylNum !== 0;
+    const reText = `右眼${reSphere}DS${hasRCylinder ? `/${formatNumber(formData.rightEye.cylinder)}DC×${formatNumber(formData.rightEye.axis, 0)}°` : ""}`;
     parts.push(reText);
-    const hasLCylinder = formData.leftEye.cylinder.trim() && parseFloat(formData.leftEye.cylinder) !== 0;
-    const leText = `左眼${formData.leftEye.sphere}DS${hasLCylinder ? `/${formData.leftEye.cylinder}DC×${formData.leftEye.axis}°` : ""}`;
+    const leSphere = formatNumber(formData.leftEye.sphere);
+    const leCylNum = parseSafeNumber(formData.leftEye.cylinder);
+    const hasLCylinder = leCylNum !== null && leCylNum !== 0;
+    const leText = `左眼${leSphere}DS${hasLCylinder ? `/${formatNumber(formData.leftEye.cylinder)}DC×${formatNumber(formData.leftEye.axis, 0)}°` : ""}`;
     parts.push(leText);
-    parts.push(`PD ${formData.pd}mm`);
+    const pdNum = parseSafeNumber(formData.pd);
+    parts.push(`PD ${pdNum !== null ? pdNum.toFixed(0) : formData.pd}mm`);
     return parts.join("，");
   };
+
+  const sanitizeEyeData = (eye: EyeRefraction): EyeRefraction => ({
+    nakedVision: formatNumber(eye.nakedVision, 2),
+    correctedVision: formatNumber(eye.correctedVision, 2),
+    sphere: formatNumber(eye.sphere, 2),
+    cylinder: formatNumber(eye.cylinder, 2),
+    axis: formatNumber(eye.axis, 0),
+    add: eye.add ? formatNumber(eye.add, 2) : ""
+  });
+
+  const sanitizeCurvature = (curv: EyeCurvature): EyeCurvature => ({
+    horizontal: curv.horizontal ? formatNumber(curv.horizontal, 2) : "",
+    vertical: curv.vertical ? formatNumber(curv.vertical, 2) : ""
+  });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -671,21 +742,29 @@ function PrescriptionForm({
     setErrors(validationErrors);
     if (Object.keys(validationErrors).length > 0) return;
 
+    const sanitizedRightEye = sanitizeEyeData(formData.rightEye);
+    const sanitizedLeftEye = sanitizeEyeData(formData.leftEye);
+    const sanitizedCurvature: CornealCurvature = {
+      right: sanitizeCurvature(formData.cornealCurvature.right),
+      left: sanitizeCurvature(formData.cornealCurvature.left)
+    };
+    const sanitizedPd = formatNumber(formData.pd, 0);
+
     const summary = generateSummary();
     onSubmit({
-      patientNo: formData.patientNo,
-      category: formData.category || formData.ageGroup,
+      patientNo: formData.patientNo.trim(),
+      category: formData.category.trim() || formData.ageGroup,
       type: formData.type,
       summary,
-      patientName: formData.patientName,
+      patientName: formData.patientName.trim(),
       ageGroup: formData.ageGroup,
       gender: formData.gender,
       examDate: formData.examDate,
-      rightEye: formData.rightEye,
-      leftEye: formData.leftEye,
-      pd: formData.pd,
-      cornealCurvature: formData.cornealCurvature,
-      recommendation: formData.recommendation
+      rightEye: sanitizedRightEye,
+      leftEye: sanitizedLeftEye,
+      pd: sanitizedPd,
+      cornealCurvature: sanitizedCurvature,
+      recommendation: formData.recommendation.trim()
     });
     setFormData(emptyPrescriptionForm);
     setErrors({});
