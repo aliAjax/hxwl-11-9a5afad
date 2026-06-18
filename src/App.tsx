@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import "./styles.css";
 
 interface PatientProfile {
@@ -10,8 +10,63 @@ interface PatientProfile {
   remark: string;
 }
 
+type ReminderStatus = "overdue" | "upcoming" | "normal";
+
+interface PatientReminder extends PatientProfile {
+  reminderStatus: ReminderStatus;
+  nextCheckDate: string;
+  daysUntilNext: number;
+  reminderCycle: number;
+}
+
 const ageGroups = ["儿童", "青少年", "成人", "中老年"];
 const lensTypes = ["单光镜", "渐进片", "角膜塑形镜", "散光镜", "老花镜"];
+
+const REMINDER_CYCLES: Record<string, number> = {
+  "儿童-角膜塑形镜": 30,
+  "儿童-单光镜": 30,
+  "儿童-散光镜": 30,
+  "青少年-角膜塑形镜": 30,
+  "成人-渐进片": 180,
+  "中老年-渐进片": 180,
+  "成人-老花镜": 180,
+  "中老年-老花镜": 180,
+};
+
+const DEFAULT_CYCLE = 90;
+const UPCOMING_THRESHOLD = 7;
+
+function getReminderCycle(ageGroup: string, lensType: string): number {
+  const key = `${ageGroup}-${lensType}`;
+  return REMINDER_CYCLES[key] || DEFAULT_CYCLE;
+}
+
+function calculateReminder(patient: PatientProfile, today: Date): PatientReminder {
+  const cycleDays = getReminderCycle(patient.ageGroup, patient.lensType);
+  const lastCheck = new Date(patient.lastCheckDate);
+  const nextCheck = new Date(lastCheck);
+  nextCheck.setDate(lastCheck.getDate() + cycleDays);
+
+  const diffTime = nextCheck.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  let status: ReminderStatus;
+  if (diffDays < 0) {
+    status = "overdue";
+  } else if (diffDays <= UPCOMING_THRESHOLD) {
+    status = "upcoming";
+  } else {
+    status = "normal";
+  }
+
+  return {
+    ...patient,
+    reminderStatus: status,
+    nextCheckDate: nextCheck.toISOString().split("T")[0],
+    daysUntilNext: diffDays,
+    reminderCycle: cycleDays,
+  };
+}
 
 const initialPatients: PatientProfile[] = [
   {
@@ -37,6 +92,78 @@ const initialPatients: PatientProfile[] = [
     lensType: "散光镜",
     lastCheckDate: "2026-06-01",
     remark: "柱镜变化0.50D"
+  },
+  {
+    id: "p-004",
+    patientNo: "Patient-256",
+    ageGroup: "儿童",
+    lensType: "角膜塑形镜",
+    lastCheckDate: "2026-05-10",
+    remark: "OK镜配戴良好，需定期复查眼轴"
+  },
+  {
+    id: "p-005",
+    patientNo: "Patient-312",
+    ageGroup: "儿童",
+    lensType: "角膜塑形镜",
+    lastCheckDate: "2026-06-15",
+    remark: "视力稳定，继续保持"
+  },
+  {
+    id: "p-006",
+    patientNo: "Patient-478",
+    ageGroup: "青少年",
+    lensType: "角膜塑形镜",
+    lastCheckDate: "2026-05-18",
+    remark: "眼压略高，需关注"
+  },
+  {
+    id: "p-007",
+    patientNo: "Patient-521",
+    ageGroup: "成人",
+    lensType: "渐进片",
+    lastCheckDate: "2025-12-10",
+    remark: "花眼症状明显，渐进片适配中"
+  },
+  {
+    id: "p-008",
+    patientNo: "Patient-634",
+    ageGroup: "成人",
+    lensType: "单光镜",
+    lastCheckDate: "2026-03-15",
+    remark: "高度近视，每年需检查眼底"
+  },
+  {
+    id: "p-009",
+    patientNo: "Patient-789",
+    ageGroup: "中老年",
+    lensType: "老花镜",
+    lastCheckDate: "2026-01-05",
+    remark: "ADD +2.00，视近清晰"
+  },
+  {
+    id: "p-010",
+    patientNo: "Patient-890",
+    ageGroup: "儿童",
+    lensType: "散光镜",
+    lastCheckDate: "2026-05-20",
+    remark: "散光度数稳定"
+  },
+  {
+    id: "p-011",
+    patientNo: "Patient-901",
+    ageGroup: "成人",
+    lensType: "散光镜",
+    lastCheckDate: "2026-04-01",
+    remark: "工作性质需长时间对着电脑"
+  },
+  {
+    id: "p-012",
+    patientNo: "Patient-102",
+    ageGroup: "青少年",
+    lensType: "单光镜",
+    lastCheckDate: "2026-06-10",
+    remark: "近视度数稳定"
   }
 ];
 
@@ -58,10 +185,10 @@ const project = {
     "复查医生"
   ],
   "metrics": [
-    "近视进展",
-    "散光变化",
-    "复查提醒",
-    "处方数量"
+    "患者总数",
+    "已逾期",
+    "即将到期",
+    "正常"
   ],
   "filters": [
     "儿童",
@@ -244,15 +371,77 @@ function PatientCard({
   );
 }
 
+function ReminderCard({
+  reminder,
+  index
+}: {
+  reminder: PatientReminder;
+  index: number;
+}) {
+  const statusConfig = {
+    overdue: { label: "已逾期", className: "status-danger", textClass: "text-danger", daysText: `逾期 ${Math.abs(reminder.daysUntilNext)} 天` },
+    upcoming: { label: "即将到期", className: "status-watch", textClass: "text-watch", daysText: `还剩 ${reminder.daysUntilNext} 天` },
+    normal: { label: "正常", className: "status-ok", textClass: "text-ok", daysText: `还剩 ${reminder.daysUntilNext} 天` },
+  };
+
+  const config = statusConfig[reminder.reminderStatus];
+
+  return (
+    <article className={`reminder-card reminder-${reminder.reminderStatus}`}>
+      <div className={`reminder-index ${config.className}`}>{String(index + 1).padStart(2, "0")}</div>
+      <div className="reminder-info">
+        <div className="reminder-header">
+          <h3>{reminder.patientNo}</h3>
+          <span className={`reminder-status ${config.textClass}`}>{config.label}</span>
+        </div>
+        <div className="reminder-tags">
+          {reminder.ageGroup && <span className="tag tag-primary">{reminder.ageGroup}</span>}
+          {reminder.lensType && <span className="tag tag-accent">{reminder.lensType}</span>}
+          <span className="tag tag-cycle">周期 {reminder.reminderCycle} 天</span>
+        </div>
+        <div className="reminder-dates">
+          <p className="reminder-date">上次复查：{reminder.lastCheckDate}</p>
+          <p className={`reminder-due ${config.textClass}`}>下次复查：{reminder.nextCheckDate} · {config.daysText}</p>
+        </div>
+        {reminder.remark && <p className="patient-remark">{reminder.remark}</p>}
+      </div>
+    </article>
+  );
+}
+
 function App() {
   const [patients, setPatients] = useState<PatientProfile[]>(initialPatients);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [today] = useState(new Date("2026-06-19"));
 
-  const values = project.metrics.map((metric: string, index: number) => {
-    const base = [84, 12, 31, 7][index % 4];
-    return String(base + index * 3);
-  });
+  const reminders = useMemo(() => {
+    return patients
+      .filter(p => p.lastCheckDate)
+      .map(p => calculateReminder(p, today))
+      .sort((a, b) => a.daysUntilNext - b.daysUntilNext);
+  }, [patients, today]);
+
+  const { overdue, upcoming, normal } = useMemo(() => {
+    return {
+      overdue: reminders.filter(r => r.reminderStatus === "overdue"),
+      upcoming: reminders.filter(r => r.reminderStatus === "upcoming"),
+      normal: reminders.filter(r => r.reminderStatus === "normal"),
+    };
+  }, [reminders]);
+
+  const reminderCounts = {
+    overdue: overdue.length,
+    upcoming: upcoming.length,
+    normal: normal.length,
+  };
+
+  const metricValues = [
+    String(patients.length),
+    String(reminderCounts.overdue),
+    String(reminderCounts.upcoming),
+    String(reminderCounts.normal),
+  ];
 
   const handleAdd = (data: Omit<PatientProfile, "id">) => {
     const newPatient: PatientProfile = {
@@ -313,8 +502,74 @@ function App() {
 
       <section className="metrics-grid">
         {project.metrics.map((metric: string, index: number) => (
-          <MetricCard key={metric} label={metric} value={values[index]} index={index} />
+          <MetricCard key={metric} label={metric} value={metricValues[index]} index={index} />
         ))}
+      </section>
+
+      <section className="reminder-board panel">
+        <div className="section-heading">
+          <div>
+            <p>复查管理</p>
+            <h2>复查提醒看板</h2>
+          </div>
+          <span className="today-info">今日日期：{today.toISOString().split("T")[0]}</span>
+        </div>
+        <div className="reminder-columns">
+          <div className="reminder-column">
+            <div className="column-header column-danger">
+              <span className="column-dot"></span>
+              <h3>已逾期</h3>
+              <span className="column-count">{overdue.length}</span>
+            </div>
+            <div className="reminder-list">
+              {overdue.length > 0 ? (
+                overdue.map((reminder, index) => (
+                  <ReminderCard key={reminder.id} reminder={reminder} index={index} />
+                ))
+              ) : (
+                <div className="empty-state small">
+                  <p>暂无逾期复查</p>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="reminder-column">
+            <div className="column-header column-watch">
+              <span className="column-dot"></span>
+              <h3>即将到期</h3>
+              <span className="column-count">{upcoming.length}</span>
+            </div>
+            <div className="reminder-list">
+              {upcoming.length > 0 ? (
+                upcoming.map((reminder, index) => (
+                  <ReminderCard key={reminder.id} reminder={reminder} index={index} />
+                ))
+              ) : (
+                <div className="empty-state small">
+                  <p>暂无即将到期</p>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="reminder-column">
+            <div className="column-header column-ok">
+              <span className="column-dot"></span>
+              <h3>正常</h3>
+              <span className="column-count">{normal.length}</span>
+            </div>
+            <div className="reminder-list">
+              {normal.length > 0 ? (
+                normal.map((reminder, index) => (
+                  <ReminderCard key={reminder.id} reminder={reminder} index={index} />
+                ))
+              ) : (
+                <div className="empty-state small">
+                  <p>暂无正常复查</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </section>
 
       <section className="workspace">
