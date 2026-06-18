@@ -471,6 +471,7 @@ const genders = ["男", "女"];
 
 const NUMBER_REGEX = /^[+-]?\d+(\.\d+)?$/;
 const POSITIVE_NUMBER_REGEX = /^\d+(\.\d+)?$/;
+const NON_NEGATIVE_INTEGER_REGEX = /^\d+$/;
 
 function isValidNumberFormat(value: string, allowSign: boolean = true): boolean {
   if (!value.trim()) return false;
@@ -565,11 +566,10 @@ function validateAxis(value: string, hasCylinder: boolean): FieldError | undefin
   if (!hasCylinder && !value.trim()) return undefined;
   if (hasCylinder && !value.trim()) return { message: "有柱镜时必填" };
   if (!value.trim()) return undefined;
-  if (!isValidNumberFormat(value, false)) return { message: "请输入正整数" };
+  if (!NON_NEGATIVE_INTEGER_REGEX.test(value.trim())) return { message: "请输入正整数" };
   const num = parseSafeNumber(value);
   if (num === null) return { message: "请输入有效数字" };
   if (num < 0 || num > 180) return { message: "范围0~180°" };
-  if (Math.floor(num) !== num) return { message: "轴位需为整数" };
   return undefined;
 }
 
@@ -630,7 +630,7 @@ function PrescriptionForm({
     } else if (field === "nakedVision" || field === "correctedVision") {
       cleaned = cleanNumber(value, false);
     } else if (field === "axis") {
-      cleaned = value.replace(/[^0-9]/g, "");
+      cleaned = cleanNumber(value, false);
     }
     setFormData(prev => ({
       ...prev,
