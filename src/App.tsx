@@ -71,6 +71,101 @@ interface PatientReminder extends PatientProfile {
   reminderCycle: number;
 }
 
+type UserRole = "optometrist" | "consultant" | "review-doctor";
+
+interface RoleConfig {
+  key: UserRole;
+  label: string;
+  description: string;
+  permissions: {
+    canCreatePatient: boolean;
+    canEditPatient: boolean;
+    canDeletePatient: boolean;
+    canCreateRecord: boolean;
+    canEditRecord: boolean;
+    canViewComparison: boolean;
+    canCreatePrescription: boolean;
+    canExport: boolean;
+    canViewReminders: boolean;
+    canLensRecommendation: boolean;
+    canImport: boolean;
+  };
+}
+
+type WorkbenchStep = "patient" | "refraction" | "comparison" | "prescription" | "export";
+
+interface WorkbenchState {
+  activeStep: WorkbenchStep;
+  selectedPatientId: string | null;
+  selectedRecordId: string | null;
+  isWorkbenchMode: boolean;
+}
+
+const roleConfigs: RoleConfig[] = [
+  {
+    key: "optometrist",
+    label: "验光师",
+    description: "负责患者验光、处方开具",
+    permissions: {
+      canCreatePatient: true,
+      canEditPatient: true,
+      canDeletePatient: false,
+      canCreateRecord: true,
+      canEditRecord: true,
+      canViewComparison: true,
+      canCreatePrescription: true,
+      canExport: true,
+      canViewReminders: true,
+      canLensRecommendation: false,
+      canImport: true,
+    }
+  },
+  {
+    key: "consultant",
+    label: "门店顾问",
+    description: "负责患者接待、配镜建议",
+    permissions: {
+      canCreatePatient: true,
+      canEditPatient: true,
+      canDeletePatient: false,
+      canCreateRecord: false,
+      canEditRecord: false,
+      canViewComparison: true,
+      canCreatePrescription: false,
+      canExport: true,
+      canViewReminders: true,
+      canLensRecommendation: true,
+      canImport: false,
+    }
+  },
+  {
+    key: "review-doctor",
+    label: "复查医生",
+    description: "负责复查诊断、对比分析",
+    permissions: {
+      canCreatePatient: false,
+      canEditPatient: true,
+      canDeletePatient: true,
+      canCreateRecord: true,
+      canEditRecord: true,
+      canViewComparison: true,
+      canCreatePrescription: true,
+      canExport: true,
+      canViewReminders: true,
+      canLensRecommendation: false,
+      canImport: true,
+    }
+  }
+];
+
+const workbenchSteps: { key: WorkbenchStep; label: string; description: string }[] = [
+  { key: "patient", label: "患者建档", description: "创建或选择患者档案" },
+  { key: "refraction", label: "初次验光", description: "录入验光检查数据" },
+  { key: "comparison", label: "复查对比", description: "历史记录对比分析" },
+  { key: "prescription", label: "处方摘要", description: "生成验光处方摘要" },
+  { key: "export", label: "导出摘要", description: "导出验光数据报告" },
+];
+
 const ageGroups = ["儿童", "青少年", "成人", "中老年"];
 const lensTypes = ["单光镜", "渐进片", "角膜塑形镜", "散光镜", "老花镜"];
 
@@ -945,6 +1040,181 @@ function getAllComparisons(records: RefractionRecord[]): PrescriptionComparisonR
   return results.sort((a, b) =>
     parseLocalDate(b.currRecord.examDate).getTime() - parseLocalDate(a.currRecord.examDate).getTime()
   );
+}
+
+function generatePrescriptionSummary(record: RefractionRecord, patient?: PatientProfile | null): string {
+  const lines: string[] = [];
+
+  lines.push("═══════════════════════════════════════");
+  lines.push("           验光处方摘要");
+  lines.push("═══════════════════════════════════════");
+  lines.push("");
+
+  lines.push(`患者编号：${record.patientNo}`);
+  lines.push(`患者姓名：${record.patientName || "未填写"}`);
+  lines.push(`年龄段：${record.ageGroup || "未填写"}`);
+  lines.push(`性别：${record.gender || "未填写"}`);
+  lines.push(`检查日期：${record.examDate}`);
+  lines.push(`分类：${record.category || "未分类"}`);
+  lines.push(`类型：${record.type || "初配"}`);
+  lines.push("");
+
+  lines.push("─────────────────────────────────────");
+  lines.push("             屈光检查");
+  lines.push("─────────────────────────────────────");
+  lines.push("");
+
+  lines.push("右眼：");
+  lines.push(`  裸眼视力：${record.rightEye.nakedVision || "未检查"}`);
+  lines.push(`  矫正视力：${record.rightEye.correctedVision || "未检查"}`);
+  lines.push(`  球镜(SPH)：${record.rightEye.sphere || "0.00"}D`);
+  lines.push(`  柱镜(CYL)：${record.rightEye.cylinder || "0.00"}D`);
+  lines.push(`  轴位(AXIS)：${record.rightEye.axis || "0"}°`);
+  if (record.rightEye.add) {
+    lines.push(`  下加光(ADD)：${record.rightEye.add}D`);
+  }
+  lines.push("");
+
+  lines.push("左眼：");
+  lines.push(`  裸眼视力：${record.leftEye.nakedVision || "未检查"}`);
+  lines.push(`  矫正视力：${record.leftEye.correctedVision || "未检查"}`);
+  lines.push(`  球镜(SPH)：${record.leftEye.sphere || "0.00"}D`);
+  lines.push(`  柱镜(CYL)：${record.leftEye.cylinder || "0.00"}D`);
+  lines.push(`  轴位(AXIS)：${record.leftEye.axis || "0"}°`);
+  if (record.leftEye.add) {
+    lines.push(`  下加光(ADD)：${record.leftEye.add}D`);
+  }
+  lines.push("");
+
+  lines.push(`瞳距(PD)：${record.pd || "未测量"}mm`);
+  lines.push("");
+
+  if (record.cornealCurvature.right.horizontal || record.cornealCurvature.left.horizontal) {
+    lines.push("─────────────────────────────────────");
+    lines.push("           角膜曲率");
+    lines.push("─────────────────────────────────────");
+    lines.push("");
+    lines.push("右眼：");
+    lines.push(`  水平曲率：${record.cornealCurvature.right.horizontal || "未测量"}D`);
+    lines.push(`  垂直曲率：${record.cornealCurvature.right.vertical || "未测量"}D`);
+    lines.push("左眼：");
+    lines.push(`  水平曲率：${record.cornealCurvature.left.horizontal || "未测量"}D`);
+    lines.push(`  垂直曲率：${record.cornealCurvature.left.vertical || "未测量"}D`);
+    lines.push("");
+  }
+
+  lines.push("─────────────────────────────────────");
+  lines.push("             医嘱建议");
+  lines.push("─────────────────────────────────────");
+  lines.push("");
+  lines.push(record.recommendation || "暂无建议");
+  lines.push("");
+
+  if (patient) {
+    lines.push("─────────────────────────────────────");
+    lines.push("           患者备注");
+    lines.push("─────────────────────────────────────");
+    lines.push("");
+    lines.push(`用镜类型：${patient.lensType || "未选择"}`);
+    lines.push(`最近复查：${patient.lastCheckDate || "未记录"}`);
+    if (patient.remark) {
+      lines.push(`备注：${patient.remark}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("═══════════════════════════════════════");
+  lines.push(`  生成时间：${formatLocalDate(new Date())}`);
+  lines.push("═══════════════════════════════════════");
+
+  return lines.join("\n");
+}
+
+function generatePatientRecordsSummary(patient: PatientProfile, patientRecords: RefractionRecord[]): string {
+  const lines: string[] = [];
+
+  lines.push("═══════════════════════════════════════");
+  lines.push("         患者验光档案汇总");
+  lines.push("═══════════════════════════════════════");
+  lines.push("");
+
+  lines.push(`患者编号：${patient.patientNo}`);
+  lines.push(`年龄段：${patient.ageGroup}`);
+  lines.push(`用镜类型：${patient.lensType}`);
+  lines.push(`最近复查日期：${patient.lastCheckDate}`);
+  if (patient.remark) {
+    lines.push(`备注：${patient.remark}`);
+  }
+  lines.push("");
+
+  lines.push(`验光记录总数：${patientRecords.length} 条`);
+  lines.push("");
+
+  patientRecords.forEach((record, index) => {
+    lines.push(`── 第 ${index + 1} 条记录 ──`);
+    lines.push(`日期：${record.examDate} | 类型：${record.type}`);
+    lines.push(`摘要：${record.summary}`);
+    lines.push("");
+  });
+
+  lines.push("═══════════════════════════════════════");
+  lines.push(`  生成时间：${formatLocalDate(new Date())}`);
+  lines.push("═══════════════════════════════════════");
+
+  return lines.join("\n");
+}
+
+function downloadTextFile(content: string, filename: string): void {
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function exportToCsv(records: RefractionRecord[]): string {
+  const headers = [
+    "患者编号", "患者姓名", "分类", "类型", "年龄段", "性别", "检查日期",
+    "右眼裸眼视力", "右眼矫正视力", "右眼球镜", "右眼柱镜", "右眼轴位", "右眼ADD",
+    "左眼裸眼视力", "左眼矫正视力", "左眼球镜", "左眼柱镜", "左眼轴位", "左眼ADD",
+    "瞳距", "右眼水平曲率", "右眼垂直曲率", "左眼水平曲率", "左眼垂直曲率",
+    "摘要", "建议"
+  ];
+
+  const rows = records.map(record => [
+    record.patientNo,
+    record.patientName,
+    record.category,
+    record.type,
+    record.ageGroup,
+    record.gender,
+    record.examDate,
+    record.rightEye.nakedVision,
+    record.rightEye.correctedVision,
+    record.rightEye.sphere,
+    record.rightEye.cylinder,
+    record.rightEye.axis,
+    record.rightEye.add,
+    record.leftEye.nakedVision,
+    record.leftEye.correctedVision,
+    record.leftEye.sphere,
+    record.leftEye.cylinder,
+    record.leftEye.axis,
+    record.leftEye.add,
+    record.pd,
+    record.cornealCurvature.right.horizontal,
+    record.cornealCurvature.right.vertical,
+    record.cornealCurvature.left.horizontal,
+    record.cornealCurvature.left.vertical,
+    record.summary,
+    record.recommendation
+  ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+
+  return [headers.join(","), ...rows].join("\n");
 }
 
 const statusColors = ["status-ok", "status-watch", "status-danger"];
@@ -2960,6 +3230,1217 @@ function ComparisonDrawer({
   );
 }
 
+function RoleSwitcher({
+  currentRole,
+  onRoleChange,
+  roleConfigs
+}: {
+  currentRole: UserRole;
+  onRoleChange: (role: UserRole) => void;
+  roleConfigs: RoleConfig[];
+}) {
+  return (
+    <div className="role-switcher">
+      <span className="role-switcher-label">当前角色：</span>
+      <div className="role-tabs">
+        {roleConfigs.map(config => (
+          <button
+            key={config.key}
+            className={`role-tab ${currentRole === config.key ? "role-tab-active" : ""}`}
+            onClick={() => onRoleChange(config.key)}
+            title={config.description}
+          >
+            {config.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function WorkbenchStepper({
+  steps,
+  activeStep,
+  onStepClick,
+  canAccessStep
+}: {
+  steps: { key: WorkbenchStep; label: string; description: string }[];
+  activeStep: WorkbenchStep;
+  onStepClick: (step: WorkbenchStep) => void;
+  canAccessStep: (step: WorkbenchStep) => boolean;
+}) {
+  return (
+    <div className="workbench-stepper">
+      {steps.map((step, index) => {
+        const isActive = activeStep === step.key;
+        const isPast = steps.findIndex(s => s.key === activeStep) > index;
+        const canAccess = canAccessStep(step.key);
+
+        return (
+          <div key={step.key} className="stepper-item-wrapper">
+            <button
+              className={`stepper-item ${isActive ? "stepper-active" : ""} ${isPast ? "stepper-past" : ""} ${!canAccess ? "stepper-disabled" : ""}`}
+              onClick={() => canAccess && onStepClick(step.key)}
+              disabled={!canAccess}
+            >
+              <span className="stepper-number">{index + 1}</span>
+              <span className="stepper-label">{step.label}</span>
+            </button>
+            {index < steps.length - 1 && (
+              <div className={`stepper-connector ${isPast ? "stepper-connector-past" : ""}`}></div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function WorkbenchPatientStep({
+  patients,
+  selectedPatientId,
+  onSelectPatient,
+  onAddPatient,
+  canCreatePatient,
+  showForm,
+  onShowFormChange,
+  editingId,
+  onStartEdit,
+  onCancelEdit,
+  onAddSubmit,
+  onEditSubmit,
+  onDelete,
+  canDeletePatient,
+  canEditPatient,
+  patientFilter,
+  onPatientFilterChange,
+}: {
+  patients: PatientProfile[];
+  selectedPatientId: string | null;
+  onSelectPatient: (id: string) => void;
+  onAddPatient: () => void;
+  canCreatePatient: boolean;
+  showForm: boolean;
+  onShowFormChange: (show: boolean) => void;
+  editingId: string | null;
+  onStartEdit: (patient: PatientProfile) => void;
+  onCancelEdit: () => void;
+  onAddSubmit: (data: Omit<PatientProfile, "id">) => void;
+  onEditSubmit: (data: Omit<PatientProfile, "id">) => void;
+  onDelete: (id: string) => void;
+  canDeletePatient: boolean;
+  canEditPatient: boolean;
+  patientFilter: string;
+  onPatientFilterChange: (filter: string) => void;
+}) {
+  const filteredPatients = useMemo(() => {
+    if (!patientFilter || patientFilter === "all") return patients;
+    return patients.filter(p => p.ageGroup === patientFilter || p.lensType === patientFilter);
+  }, [patients, patientFilter]);
+
+  return (
+    <div className="workbench-step-content">
+      <div className="step-header">
+        <div>
+          <h2>患者建档</h2>
+          <p className="step-description">创建或选择患者档案，进入后续验光流程</p>
+        </div>
+        {canCreatePatient && !showForm && !editingId && (
+          <button className="primary-action" onClick={onAddPatient}>
+            + 新增患者
+          </button>
+        )}
+      </div>
+
+      <div className="filter-bar">
+        <span className="filter-label">筛选：</span>
+        <div className="filter-chips">
+          <button
+            className={patientFilter === "all" ? "filter-chip-active" : ""}
+            onClick={() => onPatientFilterChange("all")}
+          >
+            全部
+          </button>
+          {ageGroups.map(age => (
+            <button
+              key={age}
+              className={patientFilter === age ? "filter-chip-active" : ""}
+              onClick={() => onPatientFilterChange(age)}
+            >
+              {age}
+            </button>
+          ))}
+          {lensTypes.slice(0, 2).map(type => (
+            <button
+              key={type}
+              className={patientFilter === type ? "filter-chip-active" : ""}
+              onClick={() => onPatientFilterChange(type)}
+            >
+              {type}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {showForm && (
+        <PatientForm
+          key="workbench-add-form"
+          onSubmit={(data) => {
+            onAddSubmit(data);
+            onShowFormChange(false);
+          }}
+          onCancel={() => onShowFormChange(false)}
+        />
+      )}
+
+      {editingId && (
+        <div className="editing-form">
+          <p className="form-title">编辑档案</p>
+          <PatientForm
+            key={`workbench-edit-${editingId}`}
+            initialData={(() => {
+              const p = patients.find(p => p.id === editingId);
+              return p ? {
+                patientNo: p.patientNo,
+                ageGroup: p.ageGroup,
+                lensType: p.lensType,
+                lastCheckDate: p.lastCheckDate,
+                remark: p.remark
+              } : undefined;
+            })()}
+            onSubmit={(data) => {
+              onEditSubmit(data);
+              onCancelEdit();
+            }}
+            onCancel={onCancelEdit}
+          />
+        </div>
+      )}
+
+      <div className="patient-grid">
+        {filteredPatients.map((patient, index) => (
+          <div
+            key={patient.id}
+            className={`patient-select-card ${selectedPatientId === patient.id ? "patient-selected" : ""}`}
+            onClick={() => onSelectPatient(patient.id)}
+          >
+            <div className="patient-select-header">
+              <div className="patient-select-index">{String(index + 1).padStart(2, "0")}</div>
+              <div className="patient-select-info">
+                <h4>{patient.patientNo}</h4>
+                <span className="patient-select-sub">{patient.ageGroup} · {patient.lensType}</span>
+              </div>
+            </div>
+            <p className="patient-select-remark">{patient.remark || "暂无备注"}</p>
+            <div className="patient-select-footer">
+              <span>最近复查：{patient.lastCheckDate || "未记录"}</span>
+              <div className="patient-select-actions" onClick={e => e.stopPropagation()}>
+                {canEditPatient && !editingId && (
+                  <button
+                    className="ghost-btn small-btn"
+                    onClick={() => onStartEdit(patient)}
+                  >
+                    编辑
+                  </button>
+                )}
+                {canDeletePatient && (
+                  <button
+                    className="ghost-btn small-btn danger-btn"
+                    onClick={() => onDelete(patient.id)}
+                  >
+                    删除
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+        {filteredPatients.length === 0 && (
+          <div className="empty-state">
+            <p>暂无患者档案</p>
+            <p className="empty-hint">点击"新增患者"添加第一条记录</p>
+          </div>
+        )}
+      </div>
+
+      {selectedPatientId && (
+        <div className="step-navigation">
+          <div className="step-hint">
+            ✓ 已选择患者，可进入下一步验光
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WorkbenchRefractionStep({
+  patient,
+  records,
+  selectedRecordId,
+  onSelectRecord,
+  onAddRecord,
+  canCreateRecord,
+  showForm,
+  onShowFormChange,
+  onFormSubmit,
+  onFormCancel,
+  canViewComparison,
+}: {
+  patient: PatientProfile | null;
+  records: RefractionRecord[];
+  selectedRecordId: string | null;
+  onSelectRecord: (id: string) => void;
+  onAddRecord: () => void;
+  canCreateRecord: boolean;
+  showForm: boolean;
+  onShowFormChange: (show: boolean) => void;
+  onFormSubmit: (data: Omit<RefractionRecord, "id" | "summary"> & { summary: string }) => void;
+  onFormCancel: () => void;
+  canViewComparison: boolean;
+}) {
+  if (!patient) {
+    return (
+      <div className="workbench-step-content">
+        <div className="empty-state large">
+          <p>请先选择患者</p>
+          <p className="empty-hint">返回"患者建档"步骤选择或创建患者档案</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="workbench-step-content">
+      <div className="step-header">
+        <div>
+          <h2>初次验光</h2>
+          <p className="step-description">
+            患者：{patient.patientNo} · {patient.ageGroup} · {patient.lensType}
+          </p>
+        </div>
+        {canCreateRecord && !showForm && (
+          <button className="primary-action" onClick={onAddRecord}>
+            + 新增验光记录
+          </button>
+        )}
+      </div>
+
+      {showForm && (
+        <PrescriptionForm
+          key="workbench-prescription-form"
+          initialData={{
+            patientNo: patient.patientNo,
+            patientName: "",
+            category: patient.ageGroup || "",
+            type: records.length === 0 ? "初配" : "复查",
+            ageGroup: patient.ageGroup || "",
+            gender: "",
+            examDate: formatLocalDate(new Date()),
+            rightEye: { nakedVision: "", correctedVision: "", sphere: "", cylinder: "", axis: "", add: "" },
+            leftEye: { nakedVision: "", correctedVision: "", sphere: "", cylinder: "", axis: "", add: "" },
+            pd: "",
+            cornealCurvature: { right: { horizontal: "", vertical: "" }, left: { horizontal: "", vertical: "" } },
+            recommendation: "",
+            summary: ""
+          }}
+          onSubmit={(data) => {
+            onFormSubmit(data);
+            onShowFormChange(false);
+          }}
+          onCancel={() => onShowFormChange(false)}
+        />
+      )}
+
+      <div className="field-preview-section">
+        <h3>验光字段</h3>
+        <div className="field-grid">
+          {project.fields.map((field: string) => (
+            <label key={field}>
+              <span>{field}</span>
+              <input placeholder={"填写" + field} readOnly />
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="records-section">
+        <div className="section-subheading">
+          <h3>近期验光记录</h3>
+          <span className="record-count">共 {records.length} 条</span>
+        </div>
+        <div className="record-list">
+          {records.map((record, index) => (
+            <article
+              key={record.id}
+              className={`record-card record-clickable ${selectedRecordId === record.id ? "record-selected" : ""}`}
+              onClick={() => onSelectRecord(record.id)}
+            >
+              <div className="record-index">{String(index + 1).padStart(2, "0")}</div>
+              <div>
+                <h3>{record.patientNo} · {record.examDate} · {record.type}</h3>
+                <p>{record.summary}</p>
+              </div>
+            </article>
+          ))}
+          {records.length === 0 && (
+            <div className="empty-state small">
+              <p>暂无验光记录</p>
+              <p className="empty-hint">点击"新增验光记录"开始检查</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {selectedRecordId && (
+        <div className="step-navigation">
+          <div className="step-hint">
+            ✓ 已选择记录，可进入下一步{canViewComparison ? "复查对比" : "查看处方"}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WorkbenchComparisonStep({
+  patient,
+  records,
+  comparisons,
+  selectedRecordId,
+  onSelectRecord,
+  canViewComparison,
+}: {
+  patient: PatientProfile | null;
+  records: RefractionRecord[];
+  comparisons: PrescriptionComparisonResult[];
+  selectedRecordId: string | null;
+  onSelectRecord: (id: string) => void;
+  canViewComparison: boolean;
+}) {
+  const [filterCategory, setFilterCategory] = useState<ComparisonCategory | "all">("all");
+
+  const filteredComparisons = useMemo(() => {
+    if (filterCategory === "all") return comparisons;
+    return comparisons.filter(c => c.category === filterCategory);
+  }, [comparisons, filterCategory]);
+
+  if (!patient) {
+    return (
+      <div className="workbench-step-content">
+        <div className="empty-state large">
+          <p>请先选择患者</p>
+          <p className="empty-hint">返回"患者建档"步骤选择患者档案</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!canViewComparison) {
+    return (
+      <div className="workbench-step-content">
+        <div className="empty-state large">
+          <p>暂无权限</p>
+          <p className="empty-hint">您当前的角色无法查看复查对比数据</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="workbench-step-content">
+      <div className="step-header">
+        <div>
+          <h2>复查对比</h2>
+          <p className="step-description">
+            患者：{patient.patientNo} · 历史记录 {records.length} 条
+          </p>
+        </div>
+      </div>
+
+      <div className="comparison-filter-tabs">
+        <button
+          className={filterCategory === "all" ? "tab-active" : ""}
+          onClick={() => setFilterCategory("all")}
+        >
+          全部 ({comparisons.length})
+        </button>
+        <button
+          className={filterCategory === "myopia-progress" ? "tab-active tab-progress" : ""}
+          onClick={() => setFilterCategory("myopia-progress")}
+        >
+          近视进展 ({comparisons.filter(c => c.category === "myopia-progress").length})
+        </button>
+        <button
+          className={filterCategory === "astigmatism-change" ? "tab-active tab-astigmatism" : ""}
+          onClick={() => setFilterCategory("astigmatism-change")}
+        >
+          散光变化 ({comparisons.filter(c => c.category === "astigmatism-change").length})
+        </button>
+        <button
+          className={filterCategory === "stable" ? "tab-active tab-stable" : ""}
+          onClick={() => setFilterCategory("stable")}
+        >
+          处方稳定 ({comparisons.filter(c => c.category === "stable").length})
+        </button>
+      </div>
+
+      <div className="comparison-list">
+        {filteredComparisons.length > 0 ? (
+          filteredComparisons.map((comparison, index) => (
+            <ComparisonCard
+              key={`${comparison.prevRecord.id}-${comparison.currRecord.id}`}
+              comparison={comparison}
+              index={index}
+              onClick={() => onSelectRecord(comparison.currRecord.id)}
+            />
+          ))
+        ) : (
+          <div className="empty-state">
+            <p>暂无对比数据</p>
+            <p className="empty-hint">同一患者需至少两条验光记录才能进行对比</p>
+          </div>
+        )}
+      </div>
+
+      <div className="records-section">
+        <div className="section-subheading">
+          <h3>所有验光记录</h3>
+        </div>
+        <div className="record-list compact">
+          {records.map((record, index) => (
+            <article
+              key={record.id}
+              className={`record-card record-clickable ${selectedRecordId === record.id ? "record-selected" : ""}`}
+              onClick={() => onSelectRecord(record.id)}
+            >
+              <div className="record-index small">{String(index + 1).padStart(2, "0")}</div>
+              <div>
+                <h3>{record.examDate} · {record.type}</h3>
+                <p>{record.summary}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+
+      {selectedRecordId && (
+        <div className="step-navigation">
+          <div className="step-hint">
+            ✓ 已选择记录，可进入下一步查看处方摘要
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WorkbenchPrescriptionStep({
+  patient,
+  record,
+  records,
+  onSelectRecord,
+  canCreatePrescription,
+}: {
+  patient: PatientProfile | null;
+  record: RefractionRecord | null;
+  records: RefractionRecord[];
+  onSelectRecord: (id: string) => void;
+  canCreatePrescription: boolean;
+}) {
+  if (!patient) {
+    return (
+      <div className="workbench-step-content">
+        <div className="empty-state large">
+          <p>请先选择患者</p>
+          <p className="empty-hint">返回"患者建档"步骤选择患者档案</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!record && records.length > 0) {
+    return (
+      <div className="workbench-step-content">
+        <div className="step-header">
+          <div>
+            <h2>处方摘要</h2>
+            <p className="step-description">
+              患者：{patient.patientNo} · 请选择要查看的记录
+            </p>
+          </div>
+        </div>
+        <div className="record-list">
+          {records.map((rec, index) => (
+            <article
+              key={rec.id}
+              className="record-card record-clickable"
+              onClick={() => onSelectRecord(rec.id)}
+            >
+              <div className="record-index">{String(index + 1).padStart(2, "0")}</div>
+              <div>
+                <h3>{rec.examDate} · {rec.type}</h3>
+                <p>{rec.summary}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (!record) {
+    return (
+      <div className="workbench-step-content">
+        <div className="empty-state large">
+          <p>暂无验光记录</p>
+          <p className="empty-hint">请先在"初次验光"步骤添加验光记录</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="workbench-step-content">
+      <div className="step-header">
+        <div>
+          <h2>处方摘要</h2>
+          <p className="step-description">
+            患者：{patient.patientNo} · {record.examDate} · {record.type}
+          </p>
+        </div>
+        {records.length > 1 && (
+          <select
+            value={record.id}
+            onChange={e => onSelectRecord(e.target.value)}
+            className="record-select"
+          >
+            {records.map(r => (
+              <option key={r.id} value={r.id}>
+                {r.examDate} · {r.type}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      <div className="prescription-summary">
+        <div className="summary-section">
+          <h3>基本信息</h3>
+          <div className="summary-grid">
+            <div className="summary-item">
+              <span className="summary-label">患者编号</span>
+              <span className="summary-value">{record.patientNo}</span>
+            </div>
+            <div className="summary-item">
+              <span className="summary-label">患者姓名</span>
+              <span className="summary-value">{record.patientName || "未填写"}</span>
+            </div>
+            <div className="summary-item">
+              <span className="summary-label">年龄段</span>
+              <span className="summary-value">{record.ageGroup || "未填写"}</span>
+            </div>
+            <div className="summary-item">
+              <span className="summary-label">性别</span>
+              <span className="summary-value">{record.gender || "未填写"}</span>
+            </div>
+            <div className="summary-item">
+              <span className="summary-label">检查日期</span>
+              <span className="summary-value">{record.examDate}</span>
+            </div>
+            <div className="summary-item">
+              <span className="summary-label">类型</span>
+              <span className="summary-value">{record.type || "初配"}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="summary-section">
+          <h3>屈光检查</h3>
+          <div className="eye-compare-layout">
+            <div className="eye-summary-block">
+              <h4>右眼 (OD)</h4>
+              <div className="eye-param-list">
+                <div className="eye-param">
+                  <span>裸眼视力</span>
+                  <strong>{record.rightEye.nakedVision || "未检查"}</strong>
+                </div>
+                <div className="eye-param">
+                  <span>矫正视力</span>
+                  <strong>{record.rightEye.correctedVision || "未检查"}</strong>
+                </div>
+                <div className="eye-param">
+                  <span>球镜 (SPH)</span>
+                  <strong>{record.rightEye.sphere || "0.00"} D</strong>
+                </div>
+                <div className="eye-param">
+                  <span>柱镜 (CYL)</span>
+                  <strong>{record.rightEye.cylinder || "0.00"} D</strong>
+                </div>
+                <div className="eye-param">
+                  <span>轴位 (AXIS)</span>
+                  <strong>{record.rightEye.axis || "0"}°</strong>
+                </div>
+                {record.rightEye.add && (
+                  <div className="eye-param">
+                    <span>下加光 (ADD)</span>
+                    <strong>{record.rightEye.add} D</strong>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="eye-summary-block">
+              <h4>左眼 (OS)</h4>
+              <div className="eye-param-list">
+                <div className="eye-param">
+                  <span>裸眼视力</span>
+                  <strong>{record.leftEye.nakedVision || "未检查"}</strong>
+                </div>
+                <div className="eye-param">
+                  <span>矫正视力</span>
+                  <strong>{record.leftEye.correctedVision || "未检查"}</strong>
+                </div>
+                <div className="eye-param">
+                  <span>球镜 (SPH)</span>
+                  <strong>{record.leftEye.sphere || "0.00"} D</strong>
+                </div>
+                <div className="eye-param">
+                  <span>柱镜 (CYL)</span>
+                  <strong>{record.leftEye.cylinder || "0.00"} D</strong>
+                </div>
+                <div className="eye-param">
+                  <span>轴位 (AXIS)</span>
+                  <strong>{record.leftEye.axis || "0"}°</strong>
+                </div>
+                {record.leftEye.add && (
+                  <div className="eye-param">
+                    <span>下加光 (ADD)</span>
+                    <strong>{record.leftEye.add} D</strong>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="pd-row">
+            <span className="summary-label">瞳距 (PD)</span>
+            <strong className="pd-value">{record.pd || "未测量"} mm</strong>
+          </div>
+        </div>
+
+        {(record.cornealCurvature.right.horizontal || record.cornealCurvature.left.horizontal) && (
+          <div className="summary-section">
+            <h3>角膜曲率</h3>
+            <div className="eye-compare-layout">
+              <div className="eye-summary-block">
+                <h4>右眼 (OD)</h4>
+                <div className="eye-param-list">
+                  <div className="eye-param">
+                    <span>水平曲率</span>
+                    <strong>{record.cornealCurvature.right.horizontal || "未测量"} D</strong>
+                  </div>
+                  <div className="eye-param">
+                    <span>垂直曲率</span>
+                    <strong>{record.cornealCurvature.right.vertical || "未测量"} D</strong>
+                  </div>
+                </div>
+              </div>
+              <div className="eye-summary-block">
+                <h4>左眼 (OS)</h4>
+                <div className="eye-param-list">
+                  <div className="eye-param">
+                    <span>水平曲率</span>
+                    <strong>{record.cornealCurvature.left.horizontal || "未测量"} D</strong>
+                  </div>
+                  <div className="eye-param">
+                    <span>垂直曲率</span>
+                    <strong>{record.cornealCurvature.left.vertical || "未测量"} D</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="summary-section">
+          <h3>医嘱建议</h3>
+          <p className="recommendation-text">{record.recommendation || "暂无建议"}</p>
+        </div>
+      </div>
+
+      <div className="step-navigation">
+        <div className="step-hint">
+          ✓ 处方已生成，可进入下一步导出
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WorkbenchExportStep({
+  patient,
+  record,
+  records,
+  canExport,
+  allRecords,
+  selectedRecordId,
+  onSelectRecord,
+}: {
+  patient: PatientProfile | null;
+  record: RefractionRecord | null;
+  records: RefractionRecord[];
+  canExport: boolean;
+  allRecords: RefractionRecord[];
+  selectedRecordId: string | null;
+  onSelectRecord: (id: string) => void;
+}) {
+  const [exportType, setExportType] = useState<"single" | "patient" | "all">("single");
+  const [exportFormat, setExportFormat] = useState<"txt" | "csv">("txt");
+
+  const handleExport = () => {
+    if (!canExport) return;
+
+    if (exportType === "single" && record) {
+      const content = generatePrescriptionSummary(record, patient);
+      const filename = `处方摘要_${record.patientNo}_${record.examDate}.${exportFormat === "txt" ? "txt" : "csv"}`;
+      if (exportFormat === "txt") {
+        downloadTextFile(content, filename);
+      } else {
+        const csvContent = exportToCsv([record]);
+        downloadTextFile(csvContent, filename);
+      }
+    } else if (exportType === "patient" && patient) {
+      if (exportFormat === "txt") {
+        const content = generatePatientRecordsSummary(patient, records);
+        const filename = `患者档案_${patient.patientNo}.txt`;
+        downloadTextFile(content, filename);
+      } else {
+        const csvContent = exportToCsv(records);
+        const filename = `患者记录_${patient.patientNo}.csv`;
+        downloadTextFile(csvContent, filename);
+      }
+    } else if (exportType === "all") {
+      if (exportFormat === "txt") {
+        const summaryLines: string[] = [];
+        summaryLines.push("═══════════════════════════════════════");
+        summaryLines.push("         全部验光数据汇总");
+        summaryLines.push("═══════════════════════════════════════");
+        summaryLines.push("");
+        summaryLines.push(`导出时间：${formatLocalDate(new Date())}`);
+        summaryLines.push(`总记录数：${allRecords.length} 条`);
+        summaryLines.push("");
+        allRecords.forEach(r => {
+          summaryLines.push(`${r.examDate} | ${r.patientNo} | ${r.type} | ${r.summary}`);
+        });
+        downloadTextFile(summaryLines.join("\n"), `全部验光数据_${formatLocalDate(new Date())}.txt`);
+      } else {
+        const csvContent = exportToCsv(allRecords);
+        downloadTextFile(csvContent, `全部验光数据_${formatLocalDate(new Date())}.csv`);
+      }
+    }
+  };
+
+  if (!canExport) {
+    return (
+      <div className="workbench-step-content">
+        <div className="empty-state large">
+          <p>暂无权限</p>
+          <p className="empty-hint">您当前的角色无法导出数据</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="workbench-step-content">
+      <div className="step-header">
+        <div>
+          <h2>导出摘要</h2>
+          <p className="step-description">
+            选择导出范围和格式，生成验光数据报告
+          </p>
+        </div>
+      </div>
+
+      <div className="export-options">
+        <div className="export-option-group">
+          <h3>导出范围</h3>
+          <div className="export-type-options">
+            <label className={`export-option ${exportType === "single" ? "export-option-selected" : ""}`}>
+              <input
+                type="radio"
+                name="exportType"
+                checked={exportType === "single"}
+                onChange={() => setExportType("single")}
+              />
+              <div>
+                <strong>单条处方</strong>
+                <p>导出当前选中的单条验光处方摘要</p>
+              </div>
+            </label>
+            <label className={`export-option ${exportType === "patient" ? "export-option-selected" : ""}`}>
+              <input
+                type="radio"
+                name="exportType"
+                checked={exportType === "patient"}
+                onChange={() => setExportType("patient")}
+              />
+              <div>
+                <strong>患者全部记录</strong>
+                <p>导出当前患者的所有验光记录</p>
+              </div>
+            </label>
+            <label className={`export-option ${exportType === "all" ? "export-option-selected" : ""}`}>
+              <input
+                type="radio"
+                name="exportType"
+                checked={exportType === "all"}
+                onChange={() => setExportType("all")}
+              />
+              <div>
+                <strong>全部数据</strong>
+                <p>导出系统中所有验光记录</p>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div className="export-option-group">
+          <h3>导出格式</h3>
+          <div className="export-format-options">
+            <button
+              className={exportFormat === "txt" ? "format-btn-active" : ""}
+              onClick={() => setExportFormat("txt")}
+            >
+              TXT 文本
+            </button>
+            <button
+              className={exportFormat === "csv" ? "format-btn-active" : ""}
+              onClick={() => setExportFormat("csv")}
+            >
+              CSV 表格
+            </button>
+          </div>
+        </div>
+
+        {exportType === "single" && records.length > 0 && (
+          <div className="export-option-group">
+            <h3>选择记录</h3>
+            <select
+              value={selectedRecordId || ""}
+              onChange={e => onSelectRecord(e.target.value)}
+              className="record-select"
+            >
+              {records.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.examDate} · {r.type} · {r.summary}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <div className="export-action">
+          <button className="primary-action large-btn" onClick={handleExport}>
+            导出 {exportFormat === "txt" ? "文本" : "表格"} 文件
+          </button>
+        </div>
+      </div>
+
+      <div className="export-preview">
+        <h3>预览说明</h3>
+        <div className="preview-hint">
+          <p>
+            {exportType === "single" && "将导出当前选中的处方详细摘要，包含屈光检查、角膜曲率、医嘱建议等完整信息。"}
+            {exportType === "patient" && `将导出${patient ? patient.patientNo : "该患者"}的全部验光记录汇总。`}
+            {exportType === "all" && `将导出全部 ${allRecords.length} 条验光记录。`}
+          </p>
+          <p className="empty-hint">
+            导出格式：{exportFormat === "txt" ? "纯文本格式，便于打印和阅读" : "CSV表格格式，可导入Excel等软件"}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OptometryWorkbench({
+  currentRole,
+  roleConfigs,
+  onRoleChange,
+  workbenchState,
+  onToggleWorkbench,
+  patients,
+  records,
+  reminders,
+  comparisons,
+  onSetStep,
+  onNextStep,
+  onPrevStep,
+  onSelectPatient,
+  onSelectRecord,
+  selectedPatient,
+  selectedPatientRecords,
+  selectedWorkbenchRecord,
+  patientComparisons,
+  permissions,
+  showPatientForm,
+  onShowPatientFormChange,
+  editingPatientId,
+  onStartEditPatient,
+  onCancelEditPatient,
+  onAddPatient,
+  onEditPatient,
+  onDeletePatient,
+  showPrescriptionForm,
+  onShowPrescriptionFormChange,
+  onPrescriptionSubmit,
+  onPrescriptionCancel,
+  allRecords,
+  patientFilter,
+  onPatientFilterChange,
+  currentRoleConfig,
+}: {
+  currentRole: UserRole;
+  roleConfigs: RoleConfig[];
+  onRoleChange: (role: UserRole) => void;
+  workbenchState: WorkbenchState;
+  onToggleWorkbench: () => void;
+  patients: PatientProfile[];
+  records: RefractionRecord[];
+  reminders: PatientReminder[];
+  comparisons: PrescriptionComparisonResult[];
+  onSetStep: (step: WorkbenchStep) => void;
+  onNextStep: () => void;
+  onPrevStep: () => void;
+  onSelectPatient: (id: string) => void;
+  onSelectRecord: (id: string) => void;
+  selectedPatient: PatientProfile | null;
+  selectedPatientRecords: RefractionRecord[];
+  selectedWorkbenchRecord: RefractionRecord | null;
+  patientComparisons: PrescriptionComparisonResult[];
+  permissions: RoleConfig["permissions"];
+  showPatientForm: boolean;
+  onShowPatientFormChange: (show: boolean) => void;
+  editingPatientId: string | null;
+  onStartEditPatient: (patient: PatientProfile) => void;
+  onCancelEditPatient: () => void;
+  onAddPatient: (data: Omit<PatientProfile, "id">) => void;
+  onEditPatient: (data: Omit<PatientProfile, "id">) => void;
+  onDeletePatient: (id: string) => void;
+  showPrescriptionForm: boolean;
+  onShowPrescriptionFormChange: (show: boolean) => void;
+  onPrescriptionSubmit: (data: Omit<RefractionRecord, "id" | "summary"> & { summary: string }) => void;
+  onPrescriptionCancel: () => void;
+  allRecords: RefractionRecord[];
+  patientFilter: string;
+  onPatientFilterChange: (filter: string) => void;
+  currentRoleConfig: RoleConfig;
+}) {
+  const canAccessStep = (step: WorkbenchStep): boolean => {
+    switch (step) {
+      case "patient":
+        return true;
+      case "refraction":
+        return !!workbenchState.selectedPatientId;
+      case "comparison":
+        return !!workbenchState.selectedPatientId && permissions.canViewComparison;
+      case "prescription":
+        return !!workbenchState.selectedPatientId;
+      case "export":
+        return permissions.canExport;
+      default:
+        return false;
+    }
+  };
+
+  const currentStepIndex = workbenchSteps.findIndex(s => s.key === workbenchState.activeStep);
+
+  return (
+    <div className="optometry-workbench">
+      <div className="workbench-header">
+        <div className="workbench-title">
+          <h2>验光工作台</h2>
+          <p>患者建档 → 初次验光 → 复查对比 → 处方摘要 → 导出摘要</p>
+        </div>
+        <div className="workbench-header-actions">
+          <RoleSwitcher
+            currentRole={currentRole}
+            onRoleChange={onRoleChange}
+            roleConfigs={roleConfigs}
+          />
+          <button className="ghost-btn" onClick={onToggleWorkbench}>
+            退出工作台
+          </button>
+        </div>
+      </div>
+
+      <div className="workbench-body">
+        <aside className="workbench-sidebar">
+          <div className="sidebar-section">
+            <h3>流程步骤</h3>
+            <WorkbenchStepper
+              steps={workbenchSteps}
+              activeStep={workbenchState.activeStep}
+              onStepClick={onSetStep}
+              canAccessStep={canAccessStep}
+            />
+          </div>
+
+          {selectedPatient && (
+            <div className="sidebar-section">
+              <h3>当前患者</h3>
+              <div className="sidebar-patient-card">
+                <h4>{selectedPatient.patientNo}</h4>
+                <p>{selectedPatient.ageGroup} · {selectedPatient.lensType}</p>
+                <p className="sidebar-patient-remark">{selectedPatient.remark || "暂无备注"}</p>
+                <p className="sidebar-patient-meta">记录数：{selectedPatientRecords.length} 条</p>
+              </div>
+            </div>
+          )}
+
+          {permissions.canViewReminders && reminders.length > 0 && (
+            <div className="sidebar-section">
+              <h3>复查提醒</h3>
+              <div className="sidebar-reminders">
+                {reminders.slice(0, 5).map(reminder => (
+                  <div key={reminder.id} className={`sidebar-reminder-item status-${reminder.reminderStatus}`}>
+                    <span className="reminder-dot"></span>
+                    <div>
+                      <p>{reminder.patientNo}</p>
+                      <span>{reminder.nextCheckDate}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="sidebar-section">
+            <h3>角色说明</h3>
+            <div className="role-info-card">
+              <p className="role-info-title">{currentRoleConfig.label}</p>
+              <p className="role-info-desc">{currentRoleConfig.description}</p>
+              <ul className="role-permissions-list">
+                <li className={permissions.canCreatePatient ? "perm-yes" : "perm-no"}>
+                  {permissions.canCreatePatient ? "✓" : "✗"} 创建患者档案
+                </li>
+                <li className={permissions.canCreateRecord ? "perm-yes" : "perm-no"}>
+                  {permissions.canCreateRecord ? "✓" : "✗"} 录入验光记录
+                </li>
+                <li className={permissions.canViewComparison ? "perm-yes" : "perm-no"}>
+                  {permissions.canViewComparison ? "✓" : "✗"} 查看复查对比
+                </li>
+                <li className={permissions.canCreatePrescription ? "perm-yes" : "perm-no"}>
+                  {permissions.canCreatePrescription ? "✓" : "✗"} 开具处方
+                </li>
+                <li className={permissions.canExport ? "perm-yes" : "perm-no"}>
+                  {permissions.canExport ? "✓" : "✗"} 导出数据
+                </li>
+                <li className={permissions.canLensRecommendation ? "perm-yes" : "perm-no"}>
+                  {permissions.canLensRecommendation ? "✓" : "✗"} 配镜建议
+                </li>
+              </ul>
+            </div>
+          </div>
+        </aside>
+
+        <main className="workbench-main">
+          {workbenchState.activeStep === "patient" && (
+            <WorkbenchPatientStep
+              patients={patients}
+              selectedPatientId={workbenchState.selectedPatientId}
+              onSelectPatient={onSelectPatient}
+              onAddPatient={() => onShowPatientFormChange(true)}
+              canCreatePatient={permissions.canCreatePatient}
+              showForm={showPatientForm}
+              onShowFormChange={onShowPatientFormChange}
+              editingId={editingPatientId}
+              onStartEdit={onStartEditPatient}
+              onCancelEdit={onCancelEditPatient}
+              onAddSubmit={onAddPatient}
+              onEditSubmit={onEditPatient}
+              onDelete={onDeletePatient}
+              canDeletePatient={permissions.canDeletePatient}
+              canEditPatient={permissions.canEditPatient}
+              patientFilter={patientFilter}
+              onPatientFilterChange={onPatientFilterChange}
+            />
+          )}
+
+          {workbenchState.activeStep === "refraction" && (
+            <WorkbenchRefractionStep
+              patient={selectedPatient}
+              records={selectedPatientRecords}
+              selectedRecordId={workbenchState.selectedRecordId}
+              onSelectRecord={onSelectRecord}
+              onAddRecord={() => onShowPrescriptionFormChange(true)}
+              canCreateRecord={permissions.canCreateRecord}
+              showForm={showPrescriptionForm}
+              onShowFormChange={onShowPrescriptionFormChange}
+              onFormSubmit={onPrescriptionSubmit}
+              onFormCancel={onPrescriptionCancel}
+              canViewComparison={permissions.canViewComparison}
+            />
+          )}
+
+          {workbenchState.activeStep === "comparison" && (
+            <WorkbenchComparisonStep
+              patient={selectedPatient}
+              records={selectedPatientRecords}
+              comparisons={patientComparisons}
+              selectedRecordId={workbenchState.selectedRecordId}
+              onSelectRecord={onSelectRecord}
+              canViewComparison={permissions.canViewComparison}
+            />
+          )}
+
+          {workbenchState.activeStep === "prescription" && (
+            <WorkbenchPrescriptionStep
+              patient={selectedPatient}
+              record={selectedWorkbenchRecord}
+              records={selectedPatientRecords}
+              onSelectRecord={onSelectRecord}
+              canCreatePrescription={permissions.canCreatePrescription}
+            />
+          )}
+
+          {workbenchState.activeStep === "export" && (
+            <WorkbenchExportStep
+              patient={selectedPatient}
+              record={selectedWorkbenchRecord}
+              records={selectedPatientRecords}
+              canExport={permissions.canExport}
+              allRecords={allRecords}
+              selectedRecordId={workbenchState.selectedRecordId}
+              onSelectRecord={onSelectRecord}
+            />
+          )}
+
+          <div className="workbench-footer-nav">
+            <button
+              className="ghost-btn"
+              onClick={onPrevStep}
+              disabled={currentStepIndex === 0}
+            >
+              ← 上一步
+            </button>
+            <span className="step-indicator">
+              第 {currentStepIndex + 1} 步 / 共 {workbenchSteps.length} 步
+            </span>
+            <button
+              className="primary-action"
+              onClick={onNextStep}
+              disabled={currentStepIndex === workbenchSteps.length - 1 || !canAccessStep(workbenchSteps[currentStepIndex + 1]?.key)}
+            >
+              下一步 →
+            </button>
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [dbSupported, setDbSupported] = useState<boolean | null>(null);
   const [dbReady, setDbReady] = useState(false);
@@ -2982,6 +4463,89 @@ function App() {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [customCycles, setCustomCycles] = useState<Record<string, number>>({});
+  const [currentRole, setCurrentRole] = useState<UserRole>("optometrist");
+  const [workbenchPatientFilter, setWorkbenchPatientFilter] = useState<string>("all");
+  const [showWorkbenchPatientForm, setShowWorkbenchPatientForm] = useState(false);
+  const [workbenchEditingPatientId, setWorkbenchEditingPatientId] = useState<string | null>(null);
+  const [showWorkbenchPrescriptionForm, setShowWorkbenchPrescriptionForm] = useState(false);
+  const [workbenchState, setWorkbenchState] = useState<WorkbenchState>({
+    activeStep: "patient",
+    selectedPatientId: null,
+    selectedRecordId: null,
+    isWorkbenchMode: false,
+  });
+
+  const currentRoleConfig = useMemo(() => {
+    return roleConfigs.find(r => r.key === currentRole) || roleConfigs[0];
+  }, [currentRole]);
+
+  const selectedPatient = useMemo(() => {
+    if (!workbenchState.selectedPatientId) return null;
+    return patients.find(p => p.id === workbenchState.selectedPatientId) || null;
+  }, [workbenchState.selectedPatientId, patients]);
+
+  const selectedPatientRecords = useMemo(() => {
+    if (!selectedPatient) return [];
+    return records
+      .filter(r => r.patientNo === selectedPatient.patientNo)
+      .sort((a, b) => new Date(b.examDate).getTime() - new Date(a.examDate).getTime());
+  }, [selectedPatient, records]);
+
+  const selectedWorkbenchRecord = useMemo(() => {
+    if (!workbenchState.selectedRecordId) return null;
+    return records.find(r => r.id === workbenchState.selectedRecordId) || null;
+  }, [workbenchState.selectedRecordId, records]);
+
+  const patientComparisons = useMemo(() => {
+    if (!selectedPatient) return [];
+    return getAllComparisons(selectedPatientRecords);
+  }, [selectedPatient, selectedPatientRecords]);
+
+  const toggleWorkbenchMode = useCallback(() => {
+    setWorkbenchState(prev => ({
+      ...prev,
+      isWorkbenchMode: !prev.isWorkbenchMode,
+      activeStep: "patient",
+      selectedPatientId: null,
+      selectedRecordId: null,
+    }));
+  }, []);
+
+  const setWorkbenchStep = useCallback((step: WorkbenchStep) => {
+    setWorkbenchState(prev => ({ ...prev, activeStep: step }));
+  }, []);
+
+  const selectWorkbenchPatient = useCallback((patientId: string) => {
+    setWorkbenchState(prev => ({
+      ...prev,
+      selectedPatientId: patientId,
+      selectedRecordId: null,
+    }));
+  }, []);
+
+  const selectWorkbenchRecord = useCallback((recordId: string) => {
+    setWorkbenchState(prev => ({ ...prev, selectedRecordId: recordId }));
+  }, []);
+
+  const nextWorkbenchStep = useCallback(() => {
+    const currentIndex = workbenchSteps.findIndex(s => s.key === workbenchState.activeStep);
+    if (currentIndex < workbenchSteps.length - 1) {
+      setWorkbenchState(prev => ({
+        ...prev,
+        activeStep: workbenchSteps[currentIndex + 1].key,
+      }));
+    }
+  }, [workbenchState.activeStep]);
+
+  const prevWorkbenchStep = useCallback(() => {
+    const currentIndex = workbenchSteps.findIndex(s => s.key === workbenchState.activeStep);
+    if (currentIndex > 0) {
+      setWorkbenchState(prev => ({
+        ...prev,
+        activeStep: workbenchSteps[currentIndex - 1].key,
+      }));
+    }
+  }, [workbenchState.activeStep]);
 
   const reminders = useMemo(() => {
     return patients
@@ -3292,7 +4856,76 @@ function App() {
     });
   };
 
+  const handleWorkbenchAddPatient = (data: Omit<PatientProfile, "id">) => {
+    const newPatient: PatientProfile = {
+      ...data,
+      id: `p-${Date.now()}`
+    };
+    setPatients(prev => [newPatient, ...prev]);
+    setShowWorkbenchPatientForm(false);
+    setWorkbenchState(prev => ({ ...prev, selectedPatientId: newPatient.id }));
+  };
+
+  const handleWorkbenchEditPatient = (data: Omit<PatientProfile, "id">) => {
+    if (!workbenchEditingPatientId) return;
+    setPatients(prev =>
+      prev.map(p => (p.id === workbenchEditingPatientId ? { ...p, ...data } : p))
+    );
+    setWorkbenchEditingPatientId(null);
+  };
+
+  const handleWorkbenchDeletePatient = (id: string) => {
+    if (!window.confirm("确定要删除该患者档案吗？关联的验光记录和复查周期设置也会一并删除。")) return;
+    const targetPatient = patients.find(p => p.id === id);
+    const targetPatientNo = targetPatient?.patientNo;
+    setPatients(prev => prev.filter(p => p.id !== id));
+    if (targetPatientNo) {
+      setRecords(prev => prev.filter(r => r.patientNo !== targetPatientNo));
+      setCustomCycles(prev => {
+        const next = { ...prev };
+        delete next[targetPatientNo];
+        return next;
+      });
+    }
+    if (workbenchState.selectedPatientId === id) {
+      setWorkbenchState(prev => ({ ...prev, selectedPatientId: null, selectedRecordId: null }));
+    }
+    if (workbenchEditingPatientId === id) {
+      setWorkbenchEditingPatientId(null);
+    }
+  };
+
+  const handleWorkbenchStartEditPatient = (patient: PatientProfile) => {
+    setWorkbenchEditingPatientId(patient.id);
+    setShowWorkbenchPatientForm(false);
+  };
+
+  const handleWorkbenchCancelEditPatient = () => {
+    setWorkbenchEditingPatientId(null);
+  };
+
+  const handleWorkbenchPrescriptionSubmit = (data: Omit<RefractionRecord, "id" | "summary"> & { summary: string }) => {
+    const newRecord: RefractionRecord = {
+      id: `r-${Date.now()}`,
+      ...data
+    };
+    setRecords(prev => [newRecord, ...prev]);
+    setShowWorkbenchPrescriptionForm(false);
+    setWorkbenchState(prev => ({ ...prev, selectedRecordId: newRecord.id }));
+  };
+
+  const handleWorkbenchPrescriptionCancel = () => {
+    setShowWorkbenchPrescriptionForm(false);
+  };
+
+  const handleExportSummary = () => {
+    if (!currentRoleConfig.permissions.canExport) return;
+    const csvContent = exportToCsv(records);
+    downloadTextFile(csvContent, `验光记录_${formatLocalDate(new Date())}.csv`);
+  };
+
   const editingPatient = patients.find(p => p.id === editingId);
+  const workbenchEditingPatient = patients.find(p => p.id === workbenchEditingPatientId);
 
   return (
     <main className="app-shell">
@@ -3320,15 +4953,71 @@ function App() {
         </div>
       )}
 
+      {workbenchState.isWorkbenchMode ? (
+        <OptometryWorkbench
+          currentRole={currentRole}
+          roleConfigs={roleConfigs}
+          onRoleChange={setCurrentRole}
+          workbenchState={workbenchState}
+          onToggleWorkbench={toggleWorkbenchMode}
+          patients={patients}
+          records={records}
+          reminders={reminders}
+          comparisons={comparisons}
+          onSetStep={setWorkbenchStep}
+          onNextStep={nextWorkbenchStep}
+          onPrevStep={prevWorkbenchStep}
+          onSelectPatient={selectWorkbenchPatient}
+          onSelectRecord={selectWorkbenchRecord}
+          selectedPatient={selectedPatient}
+          selectedPatientRecords={selectedPatientRecords}
+          selectedWorkbenchRecord={selectedWorkbenchRecord}
+          patientComparisons={patientComparisons}
+          permissions={currentRoleConfig.permissions}
+          showPatientForm={showWorkbenchPatientForm}
+          onShowPatientFormChange={setShowWorkbenchPatientForm}
+          editingPatientId={workbenchEditingPatientId}
+          onStartEditPatient={handleWorkbenchStartEditPatient}
+          onCancelEditPatient={handleWorkbenchCancelEditPatient}
+          onAddPatient={handleWorkbenchAddPatient}
+          onEditPatient={handleWorkbenchEditPatient}
+          onDeletePatient={handleWorkbenchDeletePatient}
+          showPrescriptionForm={showWorkbenchPrescriptionForm}
+          onShowPrescriptionFormChange={setShowWorkbenchPrescriptionForm}
+          onPrescriptionSubmit={handleWorkbenchPrescriptionSubmit}
+          onPrescriptionCancel={handleWorkbenchPrescriptionCancel}
+          allRecords={records}
+          patientFilter={workbenchPatientFilter}
+          onPatientFilterChange={setWorkbenchPatientFilter}
+          currentRoleConfig={currentRoleConfig}
+        />
+      ) : (
+        <>
       <section className="hero">
         <div>
           <p className="eyebrow">{project.id} · port {project.port}</p>
           <h1>{project.title}</h1>
           <p className="subtitle">{project.subtitle}</p>
         </div>
-        <div className="stack-card">
-          <span>技术栈</span>
-          <strong>{project.stack}</strong>
+        <div className="hero-actions">
+          <div className="role-switcher-hero">
+            <span className="role-switcher-label">当前角色：</span>
+            <div className="role-tabs">
+              {roleConfigs.map(config => (
+                <button
+                  key={config.key}
+                  className={`role-tab ${currentRole === config.key ? "role-tab-active" : ""}`}
+                  onClick={() => setCurrentRole(config.key)}
+                  title={config.description}
+                >
+                  {config.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button className="primary-action workbench-entry-btn" onClick={toggleWorkbenchMode}>
+            进入验光工作台 →
+          </button>
         </div>
       </section>
 
@@ -3719,6 +5408,8 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </main>
   );
