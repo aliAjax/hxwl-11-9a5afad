@@ -1,4 +1,5 @@
 import type { PatientProfile, RefractionRecord, ReminderStatus } from "./App";
+import type { SyncConfig } from "./sync";
 
 export interface FilterState {
   comparisonFilter: string;
@@ -21,8 +22,15 @@ export interface AppData {
   reminders: ReminderData[];
 }
 
+export interface SyncSettings {
+  config: SyncConfig;
+  lastFullSync?: string;
+  syncEnabled: boolean;
+}
+
 const DB_NAME = "hxwl-11-optometry-db";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
+const STORE_SYNC_SETTINGS = "syncSettings";
 const STORE_PATIENTS = "patients";
 const STORE_RECORDS = "records";
 const STORE_FILTERS = "filters";
@@ -88,6 +96,10 @@ export function initDB(): Promise<IDBDatabase | null> {
         const reminderStore = db.createObjectStore(STORE_REMINDERS, { keyPath: "id" });
         reminderStore.createIndex("patientNo", "patientNo", { unique: false });
         reminderStore.createIndex("reminderStatus", "reminderStatus", { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(STORE_SYNC_SETTINGS)) {
+        db.createObjectStore(STORE_SYNC_SETTINGS, { keyPath: "key" });
       }
 
       if (oldVersion < 2 && db.objectStoreNames.contains(STORE_FILTERS)) {
@@ -421,4 +433,115 @@ export function closeDB(): void {
 export async function hasPersistedData(): Promise<boolean> {
   const data = await getAllData();
   return data.patients.length > 0 || data.records.length > 0 || data.reminders.length > 0;
+}
+
+export async function saveSyncConfig(config: SyncConfig): Promise<void> {
+  const db = await initDB();
+  if (!db) return;
+
+  return withTransaction(STORE_SYNC_SETTINGS, "readwrite", (store) => {
+    return new Promise<void>((resolve, reject) => {
+      const request = store.put({ key: "syncConfig", value: config });
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+  });
+}
+
+export async function getSyncConfig(): Promise<SyncConfig | null> {
+  const db = await initDB();
+  if (!db) return null;
+
+  return withTransaction(STORE_SYNC_SETTINGS, "readonly", (store) => {
+    return new Promise<SyncConfig | null>((resolve, reject) => {
+      const request = store.get("syncConfig");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const result = request.result;
+        resolve(result?.value || null);
+      };
+    });
+  });
+}
+
+export async function saveLastFullSync(timestamp: string): Promise<void> {
+  const db = await initDB();
+  if (!db) return;
+
+  return withTransaction(STORE_SYNC_SETTINGS, "readwrite", (store) => {
+    return new Promise<void>((resolve, reject) => {
+      const request = store.put({ key: "lastFullSync", value: timestamp });
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+  });
+}
+
+export async function getLastFullSync(): Promise<string | null> {
+  const db = await initDB();
+  if (!db) return null;
+
+  return withTransaction(STORE_SYNC_SETTINGS, "readonly", (store) => {
+    return new Promise<string | null>((resolve, reject) => {
+      const request = store.get("lastFullSync");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const result = request.result;
+        resolve(result?.value || null);
+      };
+    });
+  });
+}
+
+export async function saveSyncEnabled(enabled: boolean): Promise<void> {
+  const db = await initDB();
+  if (!db) return;
+
+  return withTransaction(STORE_SYNC_SETTINGS, "readwrite", (store) => {
+    return new Promise<void>((resolve, reject) => {
+      const request = store.put({ key: "syncEnabled", value: enabled });
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+  });
+}
+
+export async function getSyncEnabled(): Promise<boolean> {
+  const db = await initDB();
+  if (!db) return false;
+
+  return withTransaction(STORE_SYNC_SETTINGS, "readonly", (store) => {
+    return new Promise<boolean>((resolve, reject) => {
+      const request = store.get("syncEnabled");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const result = request.result;
+        resolve(result?.value ?? true);
+      };
+    });
+  });
+}
+
+export async function saveSyncSettings(settings: SyncSettings): Promise<void> {
+  await Promise.all([
+    saveSyncConfig(settings.config),
+    saveSyncEnabled(settings.syncEnabled),
+    settings.lastFullSync && saveLastFullSync(settings.lastFullSync),
+  ]);
+}
+
+export async function getSyncSettings(): Promise<SyncSettings | null> {
+  const [config, syncEnabled, lastFullSync] = await Promise.all([
+    getSyncConfig(),
+    getSyncEnabled(),
+    getLastFullSync(),
+  ]);
+
+  if (!config) return null;
+
+  return {
+    config,
+    syncEnabled,
+    lastFullSync: lastFullSync || undefined,
+  };
 }

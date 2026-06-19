@@ -12,10 +12,36 @@ import {
   saveClearedFlag,
   getClearedFlag,
   getRecordsPersistedFlag,
+  getSyncConfig,
+  saveSyncConfig,
+  getSyncSettings,
+  saveSyncSettings,
   type AppData,
   type FilterState,
   type ReminderData,
 } from "./db";
+import {
+  type SyncStatus,
+  type SyncablePatient,
+  type SyncableRecord,
+  type SyncStats,
+  type SyncConfig,
+  type EntityType,
+  DEFAULT_SYNC_CONFIG,
+  SYNC_STATUS_LABELS,
+  SYNC_STATUS_COLORS,
+  SYNC_STATUS_ICONS,
+  mockServer,
+  createSyncableEntity,
+  markForSync,
+  markSynced,
+  markFailed,
+  markConflict,
+  resolveConflictKeepLocal,
+  resolveConflictKeepServer,
+  calculateSyncStats,
+  formatSyncTime,
+} from "./sync";
 
 export type UserRole = "optometrist" | "advisor" | "review-doctor";
 
@@ -2328,26 +2354,44 @@ function PatientCard({
   onEdit,
   onDelete,
   onSelect,
+  onSync,
+  onGenerateConflict,
   isSelected,
   canEdit,
   canDelete
 }: {
-  patient: PatientProfile;
+  patient: SyncablePatient;
   index: number;
   onEdit: () => void;
   onDelete: () => void;
   onSelect: () => void;
+  onSync?: () => void;
+  onGenerateConflict?: () => void;
   isSelected: boolean;
   canEdit: boolean;
   canDelete: boolean;
 }) {
+  const syncStatus = ((patient as any).syncStatus || "synced") as SyncStatus;
+  const syncColor = SYNC_STATUS_COLORS[syncStatus];
+  const syncLabel = SYNC_STATUS_LABELS[syncStatus];
+  const syncIcon = SYNC_STATUS_ICONS[syncStatus];
+
   return (
-    <article className={`patient-card ${isSelected ? "patient-card-selected" : ""}`} onClick={onSelect}>
-      <div className="patient-index">{String(index + 1).padStart(2, "0")}</div>
+    <article className={`patient-card patient-card-sync-${syncStatus} ${isSelected ? "patient-card-selected" : ""}`} onClick={onSelect}>
+      <div className="patient-index" style={{ backgroundColor: syncColor + "20", color: syncColor }}>
+        {syncIcon}
+      </div>
       <div className="patient-info">
         <div className="patient-header">
           <h3>{patient.patientNo}</h3>
           <div className="patient-tags">
+            <span 
+              className="tag tag-sync-status"
+              style={{ backgroundColor: syncColor + "15", color: syncColor, borderColor: syncColor + "40" }}
+              title={`${syncLabel}${(patient as any).lastSyncedAt ? ` · 上次同步：${formatSyncTime((patient as any).lastSyncedAt)}` : ""}`}
+            >
+              {syncIcon} {syncLabel}
+            </span>
             {patient.ageGroup && <span className="tag tag-primary">{patient.ageGroup}</span>}
             {patient.lensType && <span className="tag tag-accent">{patient.lensType}</span>}
           </div>
@@ -2356,8 +2400,31 @@ function PatientCard({
           <p className="patient-date">最近复查：{patient.lastCheckDate}</p>
         )}
         {patient.remark && <p className="patient-remark">{patient.remark}</p>}
-        {(canEdit || canDelete) && (
+        {(patient as any).syncError && (
+          <p className="patient-sync-error" title={(patient as any).syncError}>
+            ⚠️ 同步失败：{(patient as any).syncError}
+          </p>
+        )}
+        {(canEdit || canDelete || onSync) && (
           <div className="patient-actions" onClick={e => e.stopPropagation()}>
+            {onSync && syncStatus !== "synced" && (
+              <button 
+                className="text-btn sync-btn" 
+                onClick={onSync}
+                style={{ color: syncColor }}
+              >
+                {syncStatus === "conflict" ? "处理冲突" : syncStatus === "failed" ? "重试" : "同步"}
+              </button>
+            )}
+            {onGenerateConflict && syncStatus === "synced" && (
+              <button 
+                className="text-btn" 
+                onClick={onGenerateConflict}
+                title="模拟生成冲突（测试用）"
+              >
+                模拟冲突
+              </button>
+            )}
             {canEdit && <button className="text-btn" onClick={onEdit}>编辑</button>}
             {canDelete && <button className="text-btn danger" onClick={onDelete}>删除</button>}
           </div>
@@ -3382,13 +3449,13 @@ function App() {
   const [dbReady, setDbReady] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [patients, setPatients] = useState<PatientProfile[]>(initialPatients);
+  const [patients, setPatients] = useState<SyncablePatient[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [today] = useState(() => new Date());
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<RefractionRecord | null>(null);
-  const [records, setRecords] = useState<RefractionRecord[]>(refractionRecords);
+  const [records, setRecords] = useState<SyncableRecord[]>([]);
   const [showPrescriptionForm, setShowPrescriptionForm] = useState(false);
   const [showImportForm, setShowImportForm] = useState(false);
   const [comparisonDrawerOpen, setComparisonDrawerOpen] = useState(false);
@@ -3404,6 +3471,15 @@ function App() {
   const [selectedPatientNo, setSelectedPatientNo] = useState<string | null>(null);
   const [patientFilter, setPatientFilter] = useState<string>("");
   const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+
+  const [syncConfig, setSyncConfig] = useState<SyncConfig>(DEFAULT_SYNC_CONFIG);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0 });
+  const [showSyncPanel, setShowSyncPanel] = useState(false);
+  const [showConflictModal, setShowConflictModal] = useState(false);
+  const [conflictEntity, setConflictEntity] = useState<{ type: EntityType; entity: any } | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const autoSyncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const permission = ROLE_PERMISSIONS[currentRole];
   const roleConfig = ROLE_CONFIGS[currentRole];
@@ -3432,6 +3508,18 @@ function App() {
       .map(p => calculateReminder(p, today, customCycles[p.patientNo]))
       .sort((a, b) => a.daysUntilNext - b.daysUntilNext);
   }, [patients, today, customCycles]);
+
+  const patientSyncStats = useMemo(() => calculateSyncStats(patients), [patients]);
+  const recordSyncStats = useMemo(() => calculateSyncStats(records), [records]);
+
+  const overallSyncStats = useMemo<SyncStats>(() => {
+    const all = [...patients, ...records];
+    return calculateSyncStats(all);
+  }, [patients, records]);
+
+  const hasPendingSync = useMemo(() => {
+    return overallSyncStats.pending > 0 || overallSyncStats.failed > 0 || overallSyncStats.conflict > 0;
+  }, [overallSyncStats]);
 
   const scheduleSave = useCallback((data: AppData) => {
     if (!dbSupported || !dbReady) return;
@@ -3468,16 +3556,49 @@ function App() {
           const wasCleared = await getClearedFlag();
           const recordsPersisted = await getRecordsPersistedFlag();
           const persistedData = await getAllData();
+          const savedConfig = await getSyncConfig();
+          if (savedConfig) {
+            setSyncConfig(savedConfig);
+          }
+
           if (persistedData.patients.length > 0) {
-            setPatients(persistedData.patients);
+            const hasSyncStatus = persistedData.patients.some((p: any) => p.syncStatus);
+            if (hasSyncStatus) {
+              setPatients(persistedData.patients as SyncablePatient[]);
+            } else {
+              const syncablePatients = persistedData.patients.map(p => 
+                createSyncableEntity(p, "synced")
+              );
+              setPatients(syncablePatients);
+            }
           } else if (wasCleared) {
             setPatients([]);
+          } else {
+            const patientsWithSync = initialPatients.map((p, idx) => 
+              createSyncableEntity(p, idx < 5 ? "synced" : idx < 7 ? "pending" : idx < 9 ? "conflict" : "failed")
+            );
+            setPatients(patientsWithSync);
           }
+
           if (persistedData.records.length > 0) {
-            setRecords(persistedData.records);
+            const hasSyncStatus = persistedData.records.some((r: any) => r.syncStatus);
+            if (hasSyncStatus) {
+              setRecords(persistedData.records as SyncableRecord[]);
+            } else {
+              const syncableRecords = persistedData.records.map(r => 
+                createSyncableEntity(r, "synced")
+              );
+              setRecords(syncableRecords);
+            }
           } else if (recordsPersisted || wasCleared) {
             setRecords([]);
+          } else {
+            const recordsWithSync = refractionRecords.map((r, idx) => 
+              createSyncableEntity(r, idx < 8 ? "synced" : idx < 12 ? "pending" : idx < 14 ? "conflict" : "failed")
+            );
+            setRecords(recordsWithSync);
           }
+
           if (persistedData.filters.comparisonFilter) {
             setComparisonFilter(persistedData.filters.comparisonFilter as ComparisonCategory | "all");
           }
@@ -3507,6 +3628,9 @@ function App() {
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
+      }
+      if (autoSyncTimerRef.current) {
+        clearInterval(autoSyncTimerRef.current);
       }
     };
   }, []);
@@ -3555,6 +3679,193 @@ function App() {
       console.error("清空数据失败:", err);
     }
   };
+
+  const showSyncMessage = useCallback((msg: string, duration = 3000) => {
+    setSyncMessage(msg);
+    setTimeout(() => setSyncMessage(null), duration);
+  }, []);
+
+  const handleSyncAll = useCallback(async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    setSyncProgress({ current: 0, total: 0 });
+
+    try {
+      const pendingPatients = patients.filter(p => p.syncStatus === "pending" || p.syncStatus === "failed");
+      const pendingRecords = records.filter(r => r.syncStatus === "pending" || r.syncStatus === "failed");
+      const total = pendingPatients.length + pendingRecords.length;
+      setSyncProgress({ current: 0, total });
+
+      let completed = 0;
+      let successCount = 0;
+      let failedCount = 0;
+      let conflictCount = 0;
+
+      if (pendingPatients.length > 0) {
+        const { results } = await mockServer.pushBatch("patient", pendingPatients, syncConfig, (c, t) => {
+          setSyncProgress({ current: completed + c, total });
+        });
+
+        const updatedPatients = [...patients];
+        results.forEach((result, id) => {
+          const idx = updatedPatients.findIndex(p => p.id === id);
+          if (idx !== -1) {
+            if (result.conflict && result.data) {
+              updatedPatients[idx] = markConflict(updatedPatients[idx], result.data, "update-update");
+              conflictCount++;
+            } else if (result.success && result.serverVersion) {
+              updatedPatients[idx] = markSynced(updatedPatients[idx], result.serverVersion);
+              successCount++;
+            } else if (result.error) {
+              updatedPatients[idx] = markFailed(updatedPatients[idx], result.error);
+              failedCount++;
+            }
+            completed++;
+            setSyncProgress({ current: completed, total });
+          }
+        });
+        setPatients(updatedPatients);
+      }
+
+      if (pendingRecords.length > 0) {
+        const { results } = await mockServer.pushBatch("record", pendingRecords, syncConfig, (c, t) => {
+          setSyncProgress({ current: completed + c, total });
+        });
+
+        const updatedRecords = [...records];
+        results.forEach((result, id) => {
+          const idx = updatedRecords.findIndex(r => r.id === id);
+          if (idx !== -1) {
+            if (result.conflict && result.data) {
+              updatedRecords[idx] = markConflict(updatedRecords[idx], result.data, "update-update");
+              conflictCount++;
+            } else if (result.success && result.serverVersion) {
+              updatedRecords[idx] = markSynced(updatedRecords[idx], result.serverVersion);
+              successCount++;
+            } else if (result.error) {
+              updatedRecords[idx] = markFailed(updatedRecords[idx], result.error);
+              failedCount++;
+            }
+            completed++;
+            setSyncProgress({ current: completed, total });
+          }
+        });
+        setRecords(updatedRecords);
+      }
+
+      const msg = `同步完成：成功 ${successCount} 条，失败 ${failedCount} 条，冲突 ${conflictCount} 条`;
+      showSyncMessage(msg);
+    } catch (err) {
+      console.error("同步失败:", err);
+      showSyncMessage("同步过程中发生错误，请稍后重试");
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [isSyncing, patients, records, syncConfig, showSyncMessage]);
+
+  const handleSyncEntity = useCallback(async (type: EntityType, id: string) => {
+    const list = type === "patient" ? patients : records;
+    const setList = type === "patient" ? setPatients : setRecords;
+    const entity = list.find(e => e.id === id);
+    
+    if (!entity || isSyncing) return;
+
+    try {
+      const result = await mockServer.pushEntity(type, entity, syncConfig);
+      const updatedList = [...list];
+      const idx = updatedList.findIndex(e => e.id === id);
+      
+      if (idx !== -1) {
+        if (result.conflict && result.data) {
+          updatedList[idx] = markConflict(updatedList[idx], result.data, "update-update");
+          showSyncMessage("检测到数据冲突，请处理后再同步");
+        } else if (result.success && result.serverVersion) {
+          updatedList[idx] = markSynced(updatedList[idx], result.serverVersion);
+          showSyncMessage("同步成功");
+        } else if (result.error) {
+          updatedList[idx] = markFailed(updatedList[idx], result.error);
+          showSyncMessage(`同步失败：${result.error}`);
+        }
+        setList(updatedList as any);
+      }
+    } catch (err) {
+      console.error("单条同步失败:", err);
+    }
+  }, [patients, records, syncConfig, isSyncing, showSyncMessage]);
+
+  const handleRetryFailed = useCallback(() => {
+    const failedPatients = patients.filter(p => p.syncStatus === "failed");
+    const failedRecords = records.filter(r => r.syncStatus === "failed");
+    
+    if (failedPatients.length === 0 && failedRecords.length === 0) {
+      showSyncMessage("没有需要重试的失败记录");
+      return;
+    }
+
+    const resetPatients = patients.map(p => 
+      p.syncStatus === "failed" ? { ...p, syncStatus: "pending" as SyncStatus, syncError: undefined } : p
+    );
+    const resetRecords = records.map(r => 
+      r.syncStatus === "failed" ? { ...r, syncStatus: "pending" as SyncStatus, syncError: undefined } : r
+    );
+    
+    setPatients(resetPatients);
+    setRecords(resetRecords);
+    setTimeout(() => handleSyncAll(), 100);
+  }, [patients, records, showSyncMessage, handleSyncAll]);
+
+  const handleResolveConflict = useCallback((type: EntityType, id: string, keepLocal: boolean) => {
+    const list = type === "patient" ? patients : records;
+    const setList = type === "patient" ? setPatients : setRecords;
+    
+    const updatedList = list.map(entity => {
+      if (entity.id !== id) return entity;
+      if (keepLocal) {
+        return resolveConflictKeepLocal(entity);
+      } else {
+        return resolveConflictKeepServer(entity);
+      }
+    });
+    
+    setList(updatedList as any);
+    setShowConflictModal(false);
+    setConflictEntity(null);
+    showSyncMessage(keepLocal ? "已保留本地版本，待重新同步" : "已采用服务端版本");
+  }, [patients, records, showSyncMessage]);
+
+  const handleGenerateConflict = useCallback((type: EntityType, id: string) => {
+    const list = type === "patient" ? patients : records;
+    const entity = list.find(e => e.id === id);
+    if (!entity) return;
+
+    const modifiedData = {
+      ...entity,
+      remark: (entity as any).remark ? `${(entity as any).remark} (服务端已更新)` : "服务端更新备注",
+    };
+    mockServer.generateServerConflict(type, id, modifiedData);
+    
+    const setList = type === "patient" ? setPatients : setRecords;
+    const updatedList = list.map(e => 
+      e.id === id ? markConflict(e, modifiedData, "update-update") : e
+    );
+    setList(updatedList as any);
+    showSyncMessage("已模拟生成服务端冲突");
+  }, [patients, records, showSyncMessage]);
+
+  const handleUpdateSyncConfig = useCallback(async (config: Partial<SyncConfig>) => {
+    const newConfig = { ...syncConfig, ...config };
+    setSyncConfig(newConfig);
+    try {
+      await saveSyncConfig(newConfig);
+    } catch (err) {
+      console.error("保存同步配置失败:", err);
+    }
+  }, [syncConfig]);
+
+  const openConflictModal = useCallback((type: EntityType, entity: any) => {
+    setConflictEntity({ type, entity });
+    setShowConflictModal(true);
+  }, []);
 
   const openDrawer = (record: RefractionRecord) => {
     setSelectedRecord(record);
@@ -3641,10 +3952,10 @@ function App() {
   ];
 
   const handleAdd = (data: Omit<PatientProfile, "id">) => {
-    const newPatient: PatientProfile = {
-      ...data,
-      id: `p-${Date.now()}`
-    };
+    const newPatient = createSyncableEntity(
+      { ...data, id: `p-${Date.now()}` },
+      "pending"
+    );
     setPatients(prev => [newPatient, ...prev]);
     setShowForm(false);
     setSelectedPatientNo(newPatient.patientNo);
@@ -3656,7 +3967,7 @@ function App() {
   const handleEdit = (data: Omit<PatientProfile, "id">) => {
     if (!editingId) return;
     setPatients(prev =>
-      prev.map(p => (p.id === editingId ? { ...p, ...data } : p))
+      prev.map(p => (p.id === editingId ? markForSync({ ...p, ...data }) : p))
     );
     setEditingId(null);
   };
@@ -3711,26 +4022,29 @@ function App() {
   };
 
   const handlePrescriptionSubmit = (data: Omit<RefractionRecord, "id" | "summary"> & { summary: string }) => {
-    const newRecord: RefractionRecord = {
-      id: `r-${Date.now()}`,
-      ...data
-    };
+    const newRecord = createSyncableEntity(
+      { id: `r-${Date.now()}`, ...data },
+      "pending"
+    );
     setRecords(prev => [newRecord, ...prev]);
     setShowPrescriptionForm(false);
     if (!patients.find(p => p.patientNo === data.patientNo)) {
-      const newPatient: PatientProfile = {
-        id: `p-${Date.now()}`,
-        patientNo: data.patientNo,
-        ageGroup: data.ageGroup,
-        lensType: "",
-        lastCheckDate: data.examDate,
-        remark: `自动建档，${data.patientName}`
-      };
+      const newPatient = createSyncableEntity(
+        {
+          id: `p-${Date.now()}`,
+          patientNo: data.patientNo,
+          ageGroup: data.ageGroup,
+          lensType: "",
+          lastCheckDate: data.examDate,
+          remark: `自动建档，${data.patientName}`
+        },
+        "pending"
+      );
       setPatients(prev => [newPatient, ...prev]);
     } else {
       setPatients(prev => prev.map(p => {
         if (p.patientNo === data.patientNo) {
-          return { ...p, lastCheckDate: data.examDate };
+          return markForSync({ ...p, lastCheckDate: data.examDate });
         }
         return p;
       }));
@@ -3751,12 +4065,15 @@ function App() {
   };
 
   const handleImportSubmit = (recordsData: Array<Omit<RefractionRecord, "id" | "summary"> & { summary: string }>) => {
-    const newRecords: RefractionRecord[] = recordsData.map((data, index) => ({
-      id: `r-import-${Date.now()}-${index}`,
-      ...data
-    }));
+    const newRecords = recordsData.map((data, index) => 
+      createSyncableEntity(
+        { id: `r-import-${Date.now()}-${index}`, ...data },
+        "pending"
+      )
+    );
     setRecords(prev => [...newRecords, ...prev]);
     setShowImportForm(false);
+    showSyncMessage(`已导入 ${newRecords.length} 条记录，等待同步`);
   };
 
   const openLensRecommendation = () => {
@@ -4147,7 +4464,7 @@ function App() {
   );
 
   const renderDashboard = () => {
-    const sectionComponents: Record<DashboardSection, JSX.Element | null> = {
+    const sectionComponents: Record<DashboardSection, React.ReactElement | null> = {
       "metrics": (
         <section key="metrics" className="metrics-grid">
           {metricLabels.map((metric: string, index: number) => (
@@ -4225,11 +4542,19 @@ function App() {
           editingId === patient.id ? null : (
             <PatientCard
               key={patient.id}
-              patient={patient}
+              patient={patient as SyncablePatient}
               index={index}
               onEdit={() => startEdit(patient)}
               onDelete={() => handleDelete(patient.id)}
               onSelect={() => handleSelectPatient(patient.patientNo)}
+              onSync={() => {
+                if ((patient as any).syncStatus === "conflict") {
+                  openConflictModal("patient", patient);
+                } else {
+                  handleSyncEntity("patient", patient.id);
+                }
+              }}
+              onGenerateConflict={() => handleGenerateConflict("patient", patient.id)}
               isSelected={selectedPatientNo === patient.patientNo}
               canEdit={permission.canEditPatientProfile}
               canDelete={permission.canEditPatientProfile}
@@ -4679,9 +5004,45 @@ function App() {
       )}
 
       {dbSupported === true && dbReady && (
-        <div className="db-status-banner">
-          <span className="status-dot online"></span>
-          <span>本地数据已启用 · 刷新页面后数据将自动恢复</span>
+        <div className="sync-status-bar">
+          <div className="sync-status-left">
+            <span className={`status-dot ${hasPendingSync ? "pending" : "synced"}`}></span>
+            <span className="sync-status-text">
+              {isSyncing ? "正在同步..." : hasPendingSync ? `有 ${overallSyncStats.pending + overallSyncStats.failed + overallSyncStats.conflict} 条数据待同步` : "所有数据已同步"}
+            </span>
+            {!isSyncing && overallSyncStats.synced > 0 && (
+              <span className="sync-synced-count">已同步 {overallSyncStats.synced} 条</span>
+            )}
+          </div>
+          <div className="sync-status-right">
+            {overallSyncStats.failed > 0 && (
+              <span className="sync-badge sync-badge-failed" title="同步失败">
+                {SYNC_STATUS_ICONS.failed} {overallSyncStats.failed}
+              </span>
+            )}
+            {overallSyncStats.conflict > 0 && (
+              <span className="sync-badge sync-badge-conflict" title="待处理冲突">
+                {SYNC_STATUS_ICONS.conflict} {overallSyncStats.conflict}
+              </span>
+            )}
+            {overallSyncStats.pending > 0 && (
+              <span className="sync-badge sync-badge-pending" title="待同步">
+                {SYNC_STATUS_ICONS.pending} {overallSyncStats.pending}
+              </span>
+            )}
+            <button 
+              className="sync-panel-btn"
+              onClick={() => setShowSyncPanel(true)}
+            >
+              同步管理
+            </button>
+          </div>
+        </div>
+      )}
+
+      {syncMessage && (
+        <div className="sync-toast">
+          {syncMessage}
         </div>
       )}
 
@@ -4784,6 +5145,281 @@ function App() {
               </button>
               <button className="primary-action danger-btn" onClick={handleClearData}>
                 确认清空
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSyncPanel && (
+        <div className="sync-panel-overlay" onClick={() => setShowSyncPanel(false)}>
+          <div className="sync-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="sync-panel-header">
+              <h3>同步管理</h3>
+              <button className="modal-close" onClick={() => setShowSyncPanel(false)}>✕</button>
+            </div>
+            <div className="sync-panel-body">
+              <div className="sync-stats-section">
+                <h4>同步状态概览</h4>
+                <div className="sync-stats-grid">
+                  <div className="sync-stat-card synced">
+                    <div className="sync-stat-icon">{SYNC_STATUS_ICONS.synced}</div>
+                    <div className="sync-stat-info">
+                      <div className="sync-stat-value">{overallSyncStats.synced}</div>
+                      <div className="sync-stat-label">已同步</div>
+                    </div>
+                  </div>
+                  <div className="sync-stat-card pending">
+                    <div className="sync-stat-icon">{SYNC_STATUS_ICONS.pending}</div>
+                    <div className="sync-stat-info">
+                      <div className="sync-stat-value">{overallSyncStats.pending}</div>
+                      <div className="sync-stat-label">待同步</div>
+                    </div>
+                  </div>
+                  <div className="sync-stat-card conflict">
+                    <div className="sync-stat-icon">{SYNC_STATUS_ICONS.conflict}</div>
+                    <div className="sync-stat-info">
+                      <div className="sync-stat-value">{overallSyncStats.conflict}</div>
+                      <div className="sync-stat-label">冲突</div>
+                    </div>
+                  </div>
+                  <div className="sync-stat-card failed">
+                    <div className="sync-stat-icon">{SYNC_STATUS_ICONS.failed}</div>
+                    <div className="sync-stat-info">
+                      <div className="sync-stat-value">{overallSyncStats.failed}</div>
+                      <div className="sync-stat-label">失败</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="sync-detail-stats">
+                  <div className="sync-detail-row">
+                    <span>患者档案</span>
+                    <span>已同步 {patientSyncStats.synced} / 待同步 {patientSyncStats.pending} / 冲突 {patientSyncStats.conflict} / 失败 {patientSyncStats.failed}</span>
+                  </div>
+                  <div className="sync-detail-row">
+                    <span>验光记录</span>
+                    <span>已同步 {recordSyncStats.synced} / 待同步 {recordSyncStats.pending} / 冲突 {recordSyncStats.conflict} / 失败 {recordSyncStats.failed}</span>
+                  </div>
+                </div>
+              </div>
+
+              {isSyncing && (
+                <div className="sync-progress-section">
+                  <h4>同步进度</h4>
+                  <div className="sync-progress-bar">
+                    <div 
+                      className="sync-progress-fill"
+                      style={{ width: `${syncProgress.total > 0 ? (syncProgress.current / syncProgress.total * 100) : 0}%` }}
+                    ></div>
+                  </div>
+                  <p className="sync-progress-text">{syncProgress.current} / {syncProgress.total}</p>
+                </div>
+              )}
+
+              <div className="sync-actions-section">
+                <h4>同步操作</h4>
+                <div className="sync-actions-grid">
+                  <button 
+                    className="sync-action-btn primary"
+                    onClick={handleSyncAll}
+                    disabled={isSyncing || (!hasPendingSync && overallSyncStats.conflict === 0)}
+                  >
+                    {isSyncing ? "同步中..." : "立即同步"}
+                  </button>
+                  <button 
+                    className="sync-action-btn secondary"
+                    onClick={handleRetryFailed}
+                    disabled={isSyncing || overallSyncStats.failed === 0}
+                  >
+                    重试失败项
+                  </button>
+                </div>
+              </div>
+
+              <div className="sync-config-section">
+                <h4>模拟同步参数</h4>
+                <div className="sync-config-form">
+                  <div className="sync-config-item">
+                    <label>基础延迟 (ms)</label>
+                    <input 
+                      type="range" 
+                      min="100" 
+                      max="3000" 
+                      step="100"
+                      value={syncConfig.baseDelay}
+                      onChange={(e) => handleUpdateSyncConfig({ baseDelay: Number(e.target.value) })}
+                    />
+                    <span className="sync-config-value">{syncConfig.baseDelay}ms</span>
+                  </div>
+                  <div className="sync-config-item">
+                    <label>失败率</label>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="0.5" 
+                      step="0.05"
+                      value={syncConfig.failureRate}
+                      onChange={(e) => handleUpdateSyncConfig({ failureRate: Number(e.target.value) })}
+                    />
+                    <span className="sync-config-value">{Math.round(syncConfig.failureRate * 100)}%</span>
+                  </div>
+                  <div className="sync-config-item">
+                    <label>冲突率</label>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="0.3" 
+                      step="0.05"
+                      value={syncConfig.conflictRate}
+                      onChange={(e) => handleUpdateSyncConfig({ conflictRate: Number(e.target.value) })}
+                    />
+                    <span className="sync-config-value">{Math.round(syncConfig.conflictRate * 100)}%</span>
+                  </div>
+                </div>
+                <p className="sync-config-hint">
+                  💡 以上参数用于模拟网络环境，方便测试各种同步场景
+                </p>
+              </div>
+
+              <div className="sync-conflict-section">
+                <h4>冲突记录</h4>
+                {overallSyncStats.conflict === 0 ? (
+                  <p className="sync-empty-text">暂无冲突记录</p>
+                ) : (
+                  <div className="sync-conflict-list">
+                    {patients.filter(p => p.syncStatus === "conflict").map(patient => (
+                      <div key={patient.id} className="sync-conflict-item">
+                        <div className="sync-conflict-info">
+                          <span className="sync-conflict-type">患者档案</span>
+                          <span className="sync-conflict-name">{patient.patientNo} · {patient.ageGroup}</span>
+                        </div>
+                        <button 
+                          className="sync-conflict-btn"
+                          onClick={() => openConflictModal("patient", patient)}
+                        >
+                          处理冲突
+                        </button>
+                      </div>
+                    ))}
+                    {records.filter(r => r.syncStatus === "conflict").map(record => (
+                      <div key={record.id} className="sync-conflict-item">
+                        <div className="sync-conflict-info">
+                          <span className="sync-conflict-type">验光记录</span>
+                          <span className="sync-conflict-name">{record.patientNo} · {record.examDate}</span>
+                        </div>
+                        <button 
+                          className="sync-conflict-btn"
+                          onClick={() => openConflictModal("record", record)}
+                        >
+                          处理冲突
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showConflictModal && conflictEntity && (
+        <div className="modal-overlay" onClick={() => setShowConflictModal(false)}>
+          <div className="modal-dialog modal-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>处理数据冲突</h3>
+              <button className="modal-close" onClick={() => setShowConflictModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="conflict-warning">
+                <div className="conflict-warning-icon">⚠️</div>
+                <div className="conflict-warning-text">
+                  <strong>检测到数据冲突</strong>
+                  <p>该记录的本地版本与服务端版本不一致，请选择保留哪个版本。</p>
+                </div>
+              </div>
+              
+              <div className="conflict-compare">
+                <div className="conflict-version local">
+                  <div className="conflict-version-header">
+                    <span className="conflict-version-badge local-badge">本地版本</span>
+                    <span className="conflict-version-time">本地版本 v{conflictEntity.entity.localVersion}</span>
+                  </div>
+                  <div className="conflict-version-content">
+                    {conflictEntity.type === "patient" && (
+                      <>
+                        <p><strong>患者编号：</strong>{conflictEntity.entity.patientNo}</p>
+                        <p><strong>年龄段：</strong>{conflictEntity.entity.ageGroup}</p>
+                        <p><strong>镜片类型：</strong>{conflictEntity.entity.lensType || "未设置"}</p>
+                        <p><strong>上次检查：</strong>{conflictEntity.entity.lastCheckDate}</p>
+                        <p><strong>备注：</strong>{conflictEntity.entity.remark || "无"}</p>
+                      </>
+                    )}
+                    {conflictEntity.type === "record" && (
+                      <>
+                        <p><strong>患者：</strong>{conflictEntity.entity.patientNo}</p>
+                        <p><strong>检查日期：</strong>{conflictEntity.entity.examDate}</p>
+                        <p><strong>类型：</strong>{conflictEntity.entity.type}</p>
+                        <p><strong>摘要：</strong>{conflictEntity.entity.summary}</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="conflict-vs">VS</div>
+
+                <div className="conflict-version server">
+                  <div className="conflict-version-header">
+                    <span className="conflict-version-badge server-badge">服务端版本</span>
+                    <span className="conflict-version-time">服务端版本 v{conflictEntity.entity.conflictData?.serverData?.serverVersion || "?"}</span>
+                  </div>
+                  <div className="conflict-version-content">
+                    {conflictEntity.type === "patient" && conflictEntity.entity.conflictData?.serverData && (
+                      <>
+                        <p><strong>患者编号：</strong>{conflictEntity.entity.conflictData.serverData.patientNo}</p>
+                        <p><strong>年龄段：</strong>{conflictEntity.entity.conflictData.serverData.ageGroup}</p>
+                        <p><strong>镜片类型：</strong>{conflictEntity.entity.conflictData.serverData.lensType || "未设置"}</p>
+                        <p><strong>上次检查：</strong>{conflictEntity.entity.conflictData.serverData.lastCheckDate}</p>
+                        <p><strong>备注：</strong>{conflictEntity.entity.conflictData.serverData.remark || "无"}</p>
+                      </>
+                    )}
+                    {conflictEntity.type === "record" && conflictEntity.entity.conflictData?.serverData && (
+                      <>
+                        <p><strong>患者：</strong>{conflictEntity.entity.conflictData.serverData.patientNo}</p>
+                        <p><strong>检查日期：</strong>{conflictEntity.entity.conflictData.serverData.examDate}</p>
+                        <p><strong>类型：</strong>{conflictEntity.entity.conflictData.serverData.type}</p>
+                        <p><strong>摘要：</strong>{conflictEntity.entity.conflictData.serverData.summary}</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="conflict-diff-hint">
+                <p><strong>差异说明：</strong></p>
+                <ul>
+                  <li>本地版本包含您最近在本设备上的修改</li>
+                  <li>服务端版本包含其他设备或更早同步的更新</li>
+                  <li>选择保留本地版本后，数据将重新排队等待同步</li>
+                  <li>选择采用服务端版本后，本地修改将被覆盖</li>
+                </ul>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="ghost-btn" onClick={() => setShowConflictModal(false)}>
+                稍后处理
+              </button>
+              <button 
+                className="secondary-btn"
+                onClick={() => handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, false)}
+              >
+                采用服务端版本
+              </button>
+              <button 
+                className="primary-action"
+                onClick={() => handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, true)}
+              >
+                保留本地版本
               </button>
             </div>
           </div>
