@@ -539,7 +539,7 @@ const refractionRecords: RefractionRecord[] = [
   }
 ];
 
-type ComparisonCategory = "myopia-progress" | "astigmatism-change" | "vision-change" | "curvature-change" | "stable";
+type ComparisonCategory = "myopia-progress" | "astigmatism-change" | "stable";
 
 interface EyeComparison {
   sphere: { prev: string; curr: string; diff: number; changed: boolean };
@@ -578,8 +578,6 @@ const CURVATURE_CHANGE_THRESHOLD = 0.25;
 const categoryConfig: Record<ComparisonCategory, { label: string; className: string; dotClass: string }> = {
   "myopia-progress": { label: "近视进展", className: "cat-progress", dotClass: "dot-progress" },
   "astigmatism-change": { label: "散光变化", className: "cat-astigmatism", dotClass: "dot-astigmatism" },
-  "vision-change": { label: "视力变化", className: "cat-vision", dotClass: "dot-vision" },
-  "curvature-change": { label: "曲率变化", className: "cat-curvature", dotClass: "dot-curvature" },
   "stable": { label: "处方稳定", className: "cat-stable", dotClass: "dot-stable" },
 };
 
@@ -631,14 +629,8 @@ function classifyComparison(result: {
   if (myopiaProgressed) {
     return "myopia-progress";
   }
-  if (cylinderChanged || axisChanged) {
+  if (cylinderChanged || axisChanged || visionChanged || curvatureChanged) {
     return "astigmatism-change";
-  }
-  if (visionChanged) {
-    return "vision-change";
-  }
-  if (curvatureChanged) {
-    return "curvature-change";
   }
   return "stable";
 }
@@ -2025,12 +2017,10 @@ function App() {
 
   const comparisons = useMemo(() => getAllComparisons(records), [records]);
 
-  const { myopiaProgress, astigmatismChange, visionChange, curvatureChange, stable } = useMemo(() => {
+  const { myopiaProgress, astigmatismChange, stable } = useMemo(() => {
     return {
       myopiaProgress: comparisons.filter(c => c.category === "myopia-progress"),
       astigmatismChange: comparisons.filter(c => c.category === "astigmatism-change"),
-      visionChange: comparisons.filter(c => c.category === "vision-change"),
-      curvatureChange: comparisons.filter(c => c.category === "curvature-change"),
       stable: comparisons.filter(c => c.category === "stable"),
     };
   }, [comparisons]);
@@ -2044,8 +2034,6 @@ function App() {
     "患者总数",
     "近视进展",
     "散光变化",
-    "视力变化",
-    "曲率变化",
     "处方稳定",
   ];
 
@@ -2053,8 +2041,6 @@ function App() {
     String(patients.length),
     String(myopiaProgress.length),
     String(astigmatismChange.length),
-    String(visionChange.length),
-    String(curvatureChange.length),
     String(stable.length),
   ];
 
@@ -2228,18 +2214,6 @@ function App() {
               onClick={() => setComparisonFilter("astigmatism-change")}
             >
               散光变化 ({astigmatismChange.length})
-            </button>
-            <button
-              className={comparisonFilter === "vision-change" ? "tab-active tab-vision" : ""}
-              onClick={() => setComparisonFilter("vision-change")}
-            >
-              视力变化 ({visionChange.length})
-            </button>
-            <button
-              className={comparisonFilter === "curvature-change" ? "tab-active tab-curvature" : ""}
-              onClick={() => setComparisonFilter("curvature-change")}
-            >
-              曲率变化 ({curvatureChange.length})
             </button>
             <button
               className={comparisonFilter === "stable" ? "tab-active tab-stable" : ""}

@@ -992,16 +992,6 @@ input {
   border-color: #f59e0b;
 }
 
-.comparison-filter-tabs .tab-vision.tab-active {
-  background: #7c3aed;
-  border-color: #7c3aed;
-}
-
-.comparison-filter-tabs .tab-curvature.tab-active {
-  background: #0891b2;
-  border-color: #0891b2;
-}
-
 .comparison-filter-tabs .tab-stable.tab-active {
   background: var(--accent);
   border-color: var(--accent);
@@ -1032,16 +1022,6 @@ input {
 .comparison-card.cat-astigmatism {
   border-left-color: #f59e0b;
   background: #fffbeb;
-}
-
-.comparison-card.cat-vision {
-  border-left-color: #7c3aed;
-  background: #faf5ff;
-}
-
-.comparison-card.cat-curvature {
-  border-left-color: #0891b2;
-  background: #ecfeff;
 }
 
 .comparison-card.cat-stable {
@@ -1093,16 +1073,6 @@ input {
 .dot-astigmatism {
   color: #b45309;
   background: #fef3c7;
-}
-
-.dot-vision {
-  color: #6d28d9;
-  background: #ede9fe;
-}
-
-.dot-curvature {
-  color: #0e7490;
-  background: #cffafe;
 }
 
 .dot-stable {
