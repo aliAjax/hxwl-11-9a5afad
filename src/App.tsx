@@ -3853,7 +3853,9 @@ function App() {
       let conflictCount = 0;
 
       if (pendingPatients.length > 0) {
-        const { results } = await mockServer.pushBatch("patient", pendingPatients, syncConfig, (c, t) => {
+        const submittingPatients = pendingPatients.map(p => markSubmitting(p));
+        setPatients(prev => prev.map(p => submittingPatients.find(sp => sp.id === p.id) || p));
+        const { results } = await mockServer.pushBatch("patient", submittingPatients, syncConfig, (c, t) => {
           setSyncProgress({ current: completed + c, total });
         });
 
@@ -3861,14 +3863,16 @@ function App() {
         results.forEach((result, id) => {
           const idx = updatedPatients.findIndex(p => p.id === id);
           if (idx !== -1) {
+            const submittedEntity = submittingPatients.find(p => p.id === id) || updatedPatients[idx];
             if (result.conflict && result.data) {
-              updatedPatients[idx] = markConflict(updatedPatients[idx], result.data, "update-update");
+              updatedPatients[idx] = markConflict(submittedEntity, result.data, "update-update");
               conflictCount++;
             } else if (result.success && result.serverVersion) {
-              updatedPatients[idx] = markSynced(updatedPatients[idx], result.serverVersion);
+              updatedPatients[idx] = markSynced(submittedEntity, result.serverVersion);
               successCount++;
             } else if (result.error) {
-              updatedPatients[idx] = markFailed(updatedPatients[idx], result.error);
+              const isDuplicate = !!(result as any).duplicate || (submittedEntity as any).submitCount > 1;
+              updatedPatients[idx] = markFailed(submittedEntity, isDuplicate ? `${result.error}（已尝试 ${(submittedEntity as any).submitCount} 次提交）` : result.error);
               failedCount++;
             }
             completed++;
@@ -3879,7 +3883,9 @@ function App() {
       }
 
       if (pendingRecords.length > 0) {
-        const { results } = await mockServer.pushBatch("record", pendingRecords, syncConfig, (c, t) => {
+        const submittingRecords = pendingRecords.map(r => markSubmitting(r));
+        setRecords(prev => prev.map(r => submittingRecords.find(sr => sr.id === r.id) || r));
+        const { results } = await mockServer.pushBatch("record", submittingRecords, syncConfig, (c, t) => {
           setSyncProgress({ current: completed + c, total });
         });
 
@@ -3887,14 +3893,16 @@ function App() {
         results.forEach((result, id) => {
           const idx = updatedRecords.findIndex(r => r.id === id);
           if (idx !== -1) {
+            const submittedEntity = submittingRecords.find(r => r.id === id) || updatedRecords[idx];
             if (result.conflict && result.data) {
-              updatedRecords[idx] = markConflict(updatedRecords[idx], result.data, "update-update");
+              updatedRecords[idx] = markConflict(submittedEntity, result.data, "update-update");
               conflictCount++;
             } else if (result.success && result.serverVersion) {
-              updatedRecords[idx] = markSynced(updatedRecords[idx], result.serverVersion);
+              updatedRecords[idx] = markSynced(submittedEntity, result.serverVersion);
               successCount++;
             } else if (result.error) {
-              updatedRecords[idx] = markFailed(updatedRecords[idx], result.error);
+              const isDuplicate = !!(result as any).duplicate || (submittedEntity as any).submitCount > 1;
+              updatedRecords[idx] = markFailed(submittedEntity, isDuplicate ? `${result.error}（已尝试 ${(submittedEntity as any).submitCount} 次提交）` : result.error);
               failedCount++;
             }
             completed++;
@@ -3927,26 +3935,28 @@ function App() {
 
     const submittingList = [...list];
     const idx = submittingList.findIndex(e => e.id === id);
+    let submittingEntity = entity;
     if (idx !== -1) {
       submittingList[idx] = markSubmitting(submittingList[idx]);
+      submittingEntity = submittingList[idx];
       setList(submittingList as any);
     }
 
     try {
-      const result = await mockServer.pushEntity(type, entity, syncConfig);
+      const result = await mockServer.pushEntity(type, submittingEntity, syncConfig);
       const updatedList = type === "patient" ? [...patients] : [...records];
       const updatedIdx = updatedList.findIndex(e => e.id === id);
       
       if (updatedIdx !== -1) {
         if (result.conflict && result.data) {
-          updatedList[updatedIdx] = markConflict(updatedList[updatedIdx], result.data, "update-update");
+          updatedList[updatedIdx] = markConflict(submittingEntity, result.data, "update-update");
           showSyncMessage("检测到数据冲突，请处理后再同步");
         } else if (result.success && result.serverVersion) {
-          updatedList[updatedIdx] = markSynced(updatedList[updatedIdx], result.serverVersion);
+          updatedList[updatedIdx] = markSynced(submittingEntity, result.serverVersion);
           showSyncMessage("同步成功");
         } else if (result.error) {
-          const isDuplicate = !!(result as any).duplicate || (updatedList[updatedIdx] as any).submitCount > 1;
-          updatedList[updatedIdx] = markFailed(updatedList[updatedIdx], isDuplicate ? `${result.error}（已尝试 ${(updatedList[updatedIdx] as any).submitCount} 次提交）` : result.error);
+          const isDuplicate = !!(result as any).duplicate || (submittingEntity as any).submitCount > 1;
+          updatedList[updatedIdx] = markFailed(submittingEntity, isDuplicate ? `${result.error}（已尝试 ${(submittingEntity as any).submitCount} 次提交）` : result.error);
           showSyncMessage(`${isDuplicate ? "⚠️ " : ""}同步失败：${result.error}`);
         }
         setList(updatedList as any);

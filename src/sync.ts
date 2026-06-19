@@ -152,16 +152,13 @@ class MockSyncServer {
     const key = this.makeKey(type, entity.id);
 
     const submitCount = entity.submitCount || 0;
-    if (submitCount > 1 && this.shouldDetectDuplicate(config.duplicateSubmissionRate)) {
-      const isDuplicate = this.checkDuplicate(key);
-      if (isDuplicate) {
-        const recent = this.recentSubmissions.get(key);
-        return {
-          success: false,
-          error: `检测到重复提交（${submitCount} 次）：请稍后再试，避免重复提交`,
-          duplicate: true,
-        };
-      }
+    const hasRecentSubmission = this.checkDuplicate(key);
+    if (submitCount > 1 && hasRecentSubmission && this.shouldDetectDuplicate(config.duplicateSubmissionRate)) {
+      return {
+        success: false,
+        error: `检测到重复提交（${submitCount} 次）：请稍后再试，避免重复提交`,
+        duplicate: true,
+      };
     }
 
     const currentVersion = this.versions.get(key) || 0;
@@ -184,7 +181,6 @@ class MockSyncServer {
     const serverEntity = { ...strippedEntity, serverVersion: newVersion, updatedAt: new Date().toISOString() };
     this.data.set(key, serverEntity);
     this.versions.set(key, newVersion);
-    this.recentSubmissions.delete(key);
 
     return {
       success: true,
