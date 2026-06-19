@@ -45,6 +45,40 @@ export const STEP_ICONS: Record<WorkflowStep, string> = {
   "export": "📤"
 };
 
+export type DashboardSection = "metrics" | "reminder" | "comparison" | "lens-recommendation" | "field-workspace";
+
+export interface RoleConfig {
+  label: string;
+  defaultStep: WorkflowStep;
+  primaryEntryPoints: WorkflowStep[];
+  description: string;
+  dashboardSections: DashboardSection[];
+}
+
+export const ROLE_CONFIGS: Record<UserRole, RoleConfig> = {
+  "optometrist": {
+    label: "验光师",
+    defaultStep: "initial-exam",
+    primaryEntryPoints: ["initial-exam", "patient-profile", "recheck-compare"],
+    description: "负责验光检查、处方开具与患者管理",
+    dashboardSections: ["metrics", "reminder", "comparison", "field-workspace", "lens-recommendation"]
+  },
+  "advisor": {
+    label: "门店顾问",
+    defaultStep: "patient-profile",
+    primaryEntryPoints: ["patient-profile", "export"],
+    description: "负责患者接待、建档管理与配镜建议",
+    dashboardSections: ["metrics", "reminder", "lens-recommendation"]
+  },
+  "review-doctor": {
+    label: "复查医生",
+    defaultStep: "recheck-compare",
+    primaryEntryPoints: ["recheck-compare", "prescription-summary"],
+    description: "负责复查对比、处方审核与稳定评估",
+    dashboardSections: ["metrics", "comparison", "reminder"]
+  }
+};
+
 export interface RolePermission {
   canViewPatientProfile: boolean;
   canEditPatientProfile: boolean;
@@ -59,6 +93,8 @@ export interface RolePermission {
   canViewReminderBoard: boolean;
   canEditReminderCycle: boolean;
   canClearAllData: boolean;
+  canViewProfessionalParams: boolean;
+  canViewDetailedRecords: boolean;
 }
 
 export const ROLE_PERMISSIONS: Record<UserRole, RolePermission> = {
@@ -75,7 +111,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, RolePermission> = {
     canGenerateLensRecommendation: true,
     canViewReminderBoard: true,
     canEditReminderCycle: true,
-    canClearAllData: true
+    canClearAllData: true,
+    canViewProfessionalParams: true,
+    canViewDetailedRecords: true
   },
   "advisor": {
     canViewPatientProfile: true,
@@ -90,7 +128,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, RolePermission> = {
     canGenerateLensRecommendation: true,
     canViewReminderBoard: true,
     canEditReminderCycle: true,
-    canClearAllData: false
+    canClearAllData: false,
+    canViewProfessionalParams: false,
+    canViewDetailedRecords: false
   },
   "review-doctor": {
     canViewPatientProfile: true,
@@ -105,7 +145,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, RolePermission> = {
     canGenerateLensRecommendation: true,
     canViewReminderBoard: true,
     canEditReminderCycle: true,
-    canClearAllData: false
+    canClearAllData: false,
+    canViewProfessionalParams: true,
+    canViewDetailedRecords: true
   }
 };
 
@@ -2421,11 +2463,15 @@ function ReminderCard({
 function RefractionDrawer({
   record,
   open,
-  onClose
+  onClose,
+  canViewProfessionalParams = true,
+  canViewDetailedRecords = true
 }: {
   record: RefractionRecord | null;
   open: boolean;
   onClose: () => void;
+  canViewProfessionalParams?: boolean;
+  canViewDetailedRecords?: boolean;
 }) {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -2561,41 +2607,61 @@ function RefractionDrawer({
               </div>
             </section>
 
-            <section className="drawer-section">
-              <h3>角膜曲率</h3>
-              <div className="drawer-eye-tables">
-                <div className="drawer-eye-block">
-                  <p className="drawer-eye-title">右眼 (OD)</p>
-                  <div className="drawer-param-grid">
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">水平曲率</span>
-                      <span className="drawer-value">{record.cornealCurvature.right.horizontal}D</span>
+            {canViewProfessionalParams && (
+              <section className="drawer-section">
+                <h3>角膜曲率</h3>
+                <div className="drawer-eye-tables">
+                  <div className="drawer-eye-block">
+                    <p className="drawer-eye-title">右眼 (OD)</p>
+                    <div className="drawer-param-grid">
+                      <div className="drawer-param-item">
+                        <span className="drawer-label">水平曲率</span>
+                        <span className="drawer-value">{record.cornealCurvature.right.horizontal}D</span>
+                      </div>
+                      <div className="drawer-param-item">
+                        <span className="drawer-label">垂直曲率</span>
+                        <span className="drawer-value">{record.cornealCurvature.right.vertical}D</span>
+                      </div>
                     </div>
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">垂直曲率</span>
-                      <span className="drawer-value">{record.cornealCurvature.right.vertical}D</span>
+                  </div>
+                  <div className="drawer-eye-block">
+                    <p className="drawer-eye-title">左眼 (OS)</p>
+                    <div className="drawer-param-grid">
+                      <div className="drawer-param-item">
+                        <span className="drawer-label">水平曲率</span>
+                        <span className="drawer-value">{record.cornealCurvature.left.horizontal}D</span>
+                      </div>
+                      <div className="drawer-param-item">
+                        <span className="drawer-label">垂直曲率</span>
+                        <span className="drawer-value">{record.cornealCurvature.left.vertical}D</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div className="drawer-eye-block">
-                  <p className="drawer-eye-title">左眼 (OS)</p>
-                  <div className="drawer-param-grid">
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">水平曲率</span>
-                      <span className="drawer-value">{record.cornealCurvature.left.horizontal}D</span>
-                    </div>
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">垂直曲率</span>
-                      <span className="drawer-value">{record.cornealCurvature.left.vertical}D</span>
-                    </div>
-                  </div>
+              </section>
+            )}
+
+            {!canViewProfessionalParams && (
+              <section className="drawer-section">
+                <div className="param-restricted-hint">
+                  <span className="param-restricted-icon">🔒</span>
+                  <p className="param-restricted-text">角膜曲率等专业参数需验光师或复查医生权限查看</p>
                 </div>
-              </div>
-            </section>
+              </section>
+            )}
 
             <section className="drawer-section">
               <h3>验配建议</h3>
-              <p className="drawer-recommendation">{record.recommendation}</p>
+              <p className={`drawer-recommendation ${!canViewDetailedRecords ? "recommendation-summary" : ""}`}>
+                {canViewDetailedRecords
+                  ? record.recommendation
+                  : (record.summary || record.category + " · " + record.type)}
+              </p>
+              {!canViewDetailedRecords && (
+                <p className="param-restricted-text" style={{ marginTop: "8px", fontSize: "12px" }}>
+                  详细医疗建议需验光师或复查医生权限查看
+                </p>
+              )}
             </section>
           </div>
         ) : (
@@ -2848,11 +2914,13 @@ function DiffBadge({ diff, changed, unit, decimals }: { diff: number; changed: b
 function ComparisonCard({
   comparison,
   index,
-  onClick
+  onClick,
+  canViewProfessionalParams = true
 }: {
   comparison: PrescriptionComparisonResult;
   index: number;
   onClick: () => void;
+  canViewProfessionalParams?: boolean;
 }) {
   const config = categoryConfig[comparison.category];
 
@@ -2909,42 +2977,44 @@ function ComparisonCard({
               changed={comparison.rightEye.correctedVision.changed || comparison.leftEye.correctedVision.changed}
             />
           </span>
-          <span className="summary-item">
-            <span className="summary-label">角膜曲率</span>
-            <DiffBadge
-              diff={Math.max(
-                Math.abs(comparison.cornealCurvature.right.horizontal.diff),
-                Math.abs(comparison.cornealCurvature.right.vertical.diff),
-                Math.abs(comparison.cornealCurvature.left.horizontal.diff),
-                Math.abs(comparison.cornealCurvature.left.vertical.diff)
-              ) * (
-                Math.abs(comparison.cornealCurvature.right.horizontal.diff) >=
-                Math.max(
+          {canViewProfessionalParams && (
+            <span className="summary-item">
+              <span className="summary-label">角膜曲率</span>
+              <DiffBadge
+                diff={Math.max(
+                  Math.abs(comparison.cornealCurvature.right.horizontal.diff),
                   Math.abs(comparison.cornealCurvature.right.vertical.diff),
                   Math.abs(comparison.cornealCurvature.left.horizontal.diff),
                   Math.abs(comparison.cornealCurvature.left.vertical.diff)
-                )
-                  ? Math.sign(comparison.cornealCurvature.right.horizontal.diff)
-                  : Math.abs(comparison.cornealCurvature.right.vertical.diff) >=
-                    Math.max(
-                      Math.abs(comparison.cornealCurvature.left.horizontal.diff),
-                      Math.abs(comparison.cornealCurvature.left.vertical.diff)
-                    )
-                  ? Math.sign(comparison.cornealCurvature.right.vertical.diff)
-                  : Math.abs(comparison.cornealCurvature.left.horizontal.diff) >=
+                ) * (
+                  Math.abs(comparison.cornealCurvature.right.horizontal.diff) >=
+                  Math.max(
+                    Math.abs(comparison.cornealCurvature.right.vertical.diff),
+                    Math.abs(comparison.cornealCurvature.left.horizontal.diff),
                     Math.abs(comparison.cornealCurvature.left.vertical.diff)
-                  ? Math.sign(comparison.cornealCurvature.left.horizontal.diff)
-                  : Math.sign(comparison.cornealCurvature.left.vertical.diff)
-              )}
-              changed={
-                comparison.cornealCurvature.right.horizontal.changed ||
-                comparison.cornealCurvature.right.vertical.changed ||
-                comparison.cornealCurvature.left.horizontal.changed ||
-                comparison.cornealCurvature.left.vertical.changed
-              }
-              unit="D"
-            />
-          </span>
+                  )
+                    ? Math.sign(comparison.cornealCurvature.right.horizontal.diff)
+                    : Math.abs(comparison.cornealCurvature.right.vertical.diff) >=
+                      Math.max(
+                        Math.abs(comparison.cornealCurvature.left.horizontal.diff),
+                        Math.abs(comparison.cornealCurvature.left.vertical.diff)
+                      )
+                    ? Math.sign(comparison.cornealCurvature.right.vertical.diff)
+                    : Math.abs(comparison.cornealCurvature.left.horizontal.diff) >=
+                      Math.abs(comparison.cornealCurvature.left.vertical.diff)
+                    ? Math.sign(comparison.cornealCurvature.left.horizontal.diff)
+                    : Math.sign(comparison.cornealCurvature.left.vertical.diff)
+                )}
+                changed={
+                  comparison.cornealCurvature.right.horizontal.changed ||
+                  comparison.cornealCurvature.right.vertical.changed ||
+                  comparison.cornealCurvature.left.horizontal.changed ||
+                  comparison.cornealCurvature.left.vertical.changed
+                }
+                unit="D"
+              />
+            </span>
+          )}
         </div>
       </div>
     </article>
@@ -2954,11 +3024,15 @@ function ComparisonCard({
 function ComparisonDrawer({
   comparison,
   open,
-  onClose
+  onClose,
+  canViewProfessionalParams = true,
+  canViewDetailedRecords = true
 }: {
   comparison: PrescriptionComparisonResult | null;
   open: boolean;
   onClose: () => void;
+  canViewProfessionalParams?: boolean;
+  canViewDetailedRecords?: boolean;
 }) {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -3109,22 +3183,51 @@ function ComparisonDrawer({
             </div>
           </section>
 
-          <section className="drawer-section">
-            <h3>角膜曲率对比</h3>
-            <div className="drawer-eye-tables">
-              <CurvatureCompareBlock curv={comparison.cornealCurvature.right} title="右眼 (OD)" />
-              <CurvatureCompareBlock curv={comparison.cornealCurvature.left} title="左眼 (OS)" />
-            </div>
-          </section>
+          {canViewProfessionalParams && (
+            <section className="drawer-section">
+              <h3>角膜曲率对比</h3>
+              <div className="drawer-eye-tables">
+                <CurvatureCompareBlock curv={comparison.cornealCurvature.right} title="右眼 (OD)" />
+                <CurvatureCompareBlock curv={comparison.cornealCurvature.left} title="左眼 (OS)" />
+              </div>
+            </section>
+          )}
+
+          {!canViewProfessionalParams && (
+            <section className="drawer-section">
+              <div className="param-restricted-hint">
+                <span className="param-restricted-icon">🔒</span>
+                <p className="param-restricted-text">角膜曲率等专业参数需验光师或复查医生权限查看</p>
+              </div>
+            </section>
+          )}
 
           <section className="drawer-section">
             <h3>上次验配建议</h3>
-            <p className="drawer-recommendation">{comparison.prevRecord.recommendation}</p>
+            <p className={`drawer-recommendation ${!canViewDetailedRecords ? "recommendation-summary" : ""}`}>
+              {canViewDetailedRecords
+                ? comparison.prevRecord.recommendation
+                : (comparison.prevRecord.summary || comparison.prevRecord.category + " · " + comparison.prevRecord.type)}
+            </p>
+            {!canViewDetailedRecords && (
+              <p className="param-restricted-text" style={{ marginTop: "8px", fontSize: "12px" }}>
+                详细医疗建议需验光师或复查医生权限查看
+              </p>
+            )}
           </section>
 
           <section className="drawer-section">
             <h3>本次验配建议</h3>
-            <p className="drawer-recommendation">{comparison.currRecord.recommendation}</p>
+            <p className={`drawer-recommendation ${!canViewDetailedRecords ? "recommendation-summary" : ""}`}>
+              {canViewDetailedRecords
+                ? comparison.currRecord.recommendation
+                : (comparison.currRecord.summary || comparison.currRecord.category + " · " + comparison.currRecord.type)}
+            </p>
+            {!canViewDetailedRecords && (
+              <p className="param-restricted-text" style={{ marginTop: "8px", fontSize: "12px" }}>
+                详细医疗建议需验光师或复查医生权限查看
+              </p>
+            )}
           </section>
         </div>
       </aside>
@@ -3276,13 +3379,22 @@ function App() {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [customCycles, setCustomCycles] = useState<Record<string, number>>({});
 
-  const [currentRole, setCurrentRole] = useState<UserRole>("optometrist");
-  const [currentStep, setCurrentStep] = useState<WorkflowStep>("dashboard");
+  const [currentRole, setCurrentRoleState] = useState<UserRole>("optometrist");
+  const [currentStep, setCurrentStep] = useState<WorkflowStep>(ROLE_CONFIGS["optometrist"].defaultStep);
   const [selectedPatientNo, setSelectedPatientNo] = useState<string | null>(null);
   const [patientFilter, setPatientFilter] = useState<string>("");
   const [exportSuccess, setExportSuccess] = useState<string | null>(null);
 
   const permission = ROLE_PERMISSIONS[currentRole];
+  const roleConfig = ROLE_CONFIGS[currentRole];
+
+  const handleRoleChange = useCallback((role: UserRole) => {
+    setCurrentRoleState(role);
+    setCurrentStep(ROLE_CONFIGS[role].defaultStep);
+    setExportSuccess(null);
+  }, []);
+
+  const setCurrentRole = handleRoleChange;
 
   const workflowSteps: WorkflowStep[] = useMemo(() => {
     const steps: WorkflowStep[] = ["dashboard"];
@@ -3693,258 +3805,351 @@ function App() {
 
   const editingPatient = patients.find(p => p.id === editingId);
 
-  const renderDashboard = () => (
-    <>
-      <section className="metrics-grid">
-        {metricLabels.map((metric: string, index: number) => (
-          <MetricCard key={metric} label={metric} value={metricValues[index]} index={index} />
-        ))}
-      </section>
+  const renderRoleWelcome = () => (
+    <section className={`role-welcome panel role-theme-${currentRole}`}>
+      <div className="role-welcome-header">
+        <div className="role-avatar">
+          {currentRole === "optometrist" && "🔬"}
+          {currentRole === "advisor" && "👤"}
+          {currentRole === "review-doctor" && "📊"}
+        </div>
+        <div className="role-info">
+          <p className="role-label">工作台 · {roleConfig.label}视角</p>
+          <h2 className="role-title">{roleConfig.description}</h2>
+        </div>
+        <p className="role-date">今日日期：{formatLocalDate(today)}</p>
+      </div>
+      <div className="role-quick-actions">
+        <p className="role-quick-label">快速入口</p>
+        <div className="role-quick-btns">
+          {roleConfig.primaryEntryPoints.map((step, idx) => (
+            <button
+              key={step}
+              className={`quick-action-btn ${idx === 0 ? "primary" : ""}`}
+              onClick={() => setCurrentStep(step)}
+            >
+              <span className="quick-action-icon">{STEP_ICONS[step]}</span>
+              <span className="quick-action-text">{STEP_LABELS[step]}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
 
-      {permission.canViewReminderBoard && (
-        <section className="reminder-board panel">
-          <div className="section-heading">
-            <div>
-              <p>复查管理</p>
-              <h2>复查提醒看板</h2>
-            </div>
-            <span className="today-info">今日日期：{formatLocalDate(today)}</span>
+  const renderReminderBoard = () => (
+    permission.canViewReminderBoard && (
+      <section className="reminder-board panel">
+        <div className="section-heading">
+          <div>
+            <p>复查管理</p>
+            <h2>复查提醒看板</h2>
           </div>
-          <div className="reminder-columns">
-            <div className="reminder-column">
-              <div className="column-header column-danger">
-                <span className="column-dot"></span>
-                <h3>已逾期</h3>
-                <span className="column-count">{overdue.length}</span>
-              </div>
-              <div className="reminder-list">
-                {overdue.length > 0 ? (
-                  overdue.map((reminder, index) => (
-                    <ReminderCard
-                      key={reminder.id}
-                      reminder={reminder}
-                      index={index}
-                      isCustom={!!customCycles[reminder.patientNo]}
-                      onCycleChange={(days) => handleSetCustomCycle(reminder.patientNo, days)}
-                      onCycleReset={() => handleSetCustomCycle(reminder.patientNo, null)}
-                      canEditCycle={permission.canEditReminderCycle}
-                    />
-                  ))
-                ) : (
-                  <div className="empty-state small">
-                    <p>暂无逾期复查</p>
-                  </div>
-                )}
-              </div>
+          <span className="today-info">共 {reminders.length} 位患者</span>
+        </div>
+        <div className="reminder-columns">
+          <div className="reminder-column">
+            <div className="column-header column-danger">
+              <span className="column-dot"></span>
+              <h3>已逾期</h3>
+              <span className="column-count">{overdue.length}</span>
             </div>
-            <div className="reminder-column">
-              <div className="column-header column-watch">
-                <span className="column-dot"></span>
-                <h3>即将到期</h3>
-                <span className="column-count">{upcoming.length}</span>
-              </div>
-              <div className="reminder-list">
-                {upcoming.length > 0 ? (
-                  upcoming.map((reminder, index) => (
-                    <ReminderCard
-                      key={reminder.id}
-                      reminder={reminder}
-                      index={index}
-                      isCustom={!!customCycles[reminder.patientNo]}
-                      onCycleChange={(days) => handleSetCustomCycle(reminder.patientNo, days)}
-                      onCycleReset={() => handleSetCustomCycle(reminder.patientNo, null)}
-                      canEditCycle={permission.canEditReminderCycle}
-                    />
-                  ))
-                ) : (
-                  <div className="empty-state small">
-                    <p>暂无即将到期</p>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="reminder-column">
-              <div className="column-header column-ok">
-                <span className="column-dot"></span>
-                <h3>正常</h3>
-                <span className="column-count">{normal.length}</span>
-              </div>
-              <div className="reminder-list">
-                {normal.length > 0 ? (
-                  normal.map((reminder, index) => (
-                    <ReminderCard
-                      key={reminder.id}
-                      reminder={reminder}
-                      index={index}
-                      isCustom={!!customCycles[reminder.patientNo]}
-                      onCycleChange={(days) => handleSetCustomCycle(reminder.patientNo, days)}
-                      onCycleReset={() => handleSetCustomCycle(reminder.patientNo, null)}
-                      canEditCycle={permission.canEditReminderCycle}
-                    />
-                  ))
-                ) : (
-                  <div className="empty-state small">
-                    <p>暂无正常复查</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {permission.canViewRecheckCompare && (
-        <section className="comparison-board panel">
-          <div className="section-heading">
-            <div>
-              <p>处方分析</p>
-              <h2>处方对比看板</h2>
-            </div>
-            <div className="comparison-filter-tabs">
-              <button
-                className={comparisonFilter === "all" ? "tab-active" : ""}
-                onClick={() => setComparisonFilter("all")}
-              >
-                全部 ({comparisons.length})
-              </button>
-              <button
-                className={comparisonFilter === "myopia-progress" ? "tab-active tab-progress" : ""}
-                onClick={() => setComparisonFilter("myopia-progress")}
-              >
-                近视进展 ({myopiaProgress.length})
-              </button>
-              <button
-                className={comparisonFilter === "astigmatism-change" ? "tab-active tab-astigmatism" : ""}
-                onClick={() => setComparisonFilter("astigmatism-change")}
-              >
-                散光变化 ({astigmatismChange.length})
-              </button>
-              <button
-                className={comparisonFilter === "stable" ? "tab-active tab-stable" : ""}
-                onClick={() => setComparisonFilter("stable")}
-              >
-                处方稳定 ({stable.length})
-              </button>
-            </div>
-          </div>
-          <div className="comparison-list">
-            {filteredComparisons.length > 0 ? (
-              filteredComparisons.map((comparison, index) => (
-                <ComparisonCard
-                  key={`${comparison.prevRecord.id}-${comparison.currRecord.id}`}
-                  comparison={comparison}
-                  index={index}
-                  onClick={() => openComparisonDrawer(comparison)}
-                />
-              ))
-            ) : (
-              <div className="empty-state">
-                <p>暂无对比数据</p>
-                <p className="empty-hint">同一患者需至少两条验光记录才能进行对比</p>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
-
-      {permission.canGenerateLensRecommendation && (
-        <section className="lens-recommendation-panel panel">
-          <div className="section-heading">
-            <div>
-              <p>门店顾问工具</p>
-              <h2>配镜建议生成</h2>
-            </div>
-            {!showLensRecommendation && (
-              <button className="primary-action" onClick={openLensRecommendation}>
-                开启建议生成
-              </button>
-            )}
-            {showLensRecommendation && (
-              <button className="ghost-btn" onClick={closeLensRecommendation}>
-                收起
-              </button>
-            )}
-          </div>
-
-          {showLensRecommendation && (
-            <div className="recommendation-content">
-              {lensRecommendationResult ? (
-                <LensRecommendationResultDisplay
-                  result={lensRecommendationResult}
-                  onReset={resetLensRecommendation}
-                />
+            <div className="reminder-list">
+              {overdue.length > 0 ? (
+                overdue.slice(0, 3).map((reminder, index) => (
+                  <ReminderCard
+                    key={reminder.id}
+                    reminder={reminder}
+                    index={index}
+                    isCustom={!!customCycles[reminder.patientNo]}
+                    onCycleChange={(days) => handleSetCustomCycle(reminder.patientNo, days)}
+                    onCycleReset={() => handleSetCustomCycle(reminder.patientNo, null)}
+                    canEditCycle={permission.canEditReminderCycle}
+                  />
+                ))
               ) : (
-                <LensRecommendationForm onGenerate={handleLensRecommendationGenerate} />
+                <div className="empty-state small">
+                  <p>暂无逾期复查</p>
+                </div>
+              )}
+              {overdue.length > 3 && (
+                <button
+                  className="text-btn"
+                  style={{ marginTop: "8px", alignSelf: "center" }}
+                  onClick={() => setCurrentStep("recheck-compare")}
+                >
+                  查看全部 {overdue.length} 条 →
+                </button>
               )}
             </div>
-          )}
+          </div>
+          <div className="reminder-column">
+            <div className="column-header column-watch">
+              <span className="column-dot"></span>
+              <h3>即将到期</h3>
+              <span className="column-count">{upcoming.length}</span>
+            </div>
+            <div className="reminder-list">
+              {upcoming.length > 0 ? (
+                upcoming.slice(0, 3).map((reminder, index) => (
+                  <ReminderCard
+                    key={reminder.id}
+                    reminder={reminder}
+                    index={index}
+                    isCustom={!!customCycles[reminder.patientNo]}
+                    onCycleChange={(days) => handleSetCustomCycle(reminder.patientNo, days)}
+                    onCycleReset={() => handleSetCustomCycle(reminder.patientNo, null)}
+                    canEditCycle={permission.canEditReminderCycle}
+                  />
+                ))
+              ) : (
+                <div className="empty-state small">
+                  <p>暂无即将到期</p>
+                </div>
+              )}
+              {upcoming.length > 3 && (
+                <button
+                  className="text-btn"
+                  style={{ marginTop: "8px", alignSelf: "center" }}
+                  onClick={() => setCurrentStep("recheck-compare")}
+                >
+                  查看全部 {upcoming.length} 条 →
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="reminder-column">
+            <div className="column-header column-ok">
+              <span className="column-dot"></span>
+              <h3>正常</h3>
+              <span className="column-count">{normal.length}</span>
+            </div>
+            <div className="reminder-list">
+              {normal.length > 0 ? (
+                normal.slice(0, 3).map((reminder, index) => (
+                  <ReminderCard
+                    key={reminder.id}
+                    reminder={reminder}
+                    index={index}
+                    isCustom={!!customCycles[reminder.patientNo]}
+                    onCycleChange={(days) => handleSetCustomCycle(reminder.patientNo, days)}
+                    onCycleReset={() => handleSetCustomCycle(reminder.patientNo, null)}
+                    canEditCycle={permission.canEditReminderCycle}
+                  />
+                ))
+              ) : (
+                <div className="empty-state small">
+                  <p>暂无正常复查</p>
+                </div>
+              )}
+              {normal.length > 3 && (
+                <button
+                  className="text-btn"
+                  style={{ marginTop: "8px", alignSelf: "center" }}
+                  onClick={() => setCurrentStep("recheck-compare")}
+                >
+                  查看全部 {normal.length} 条 →
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+    )
+  );
 
+  const renderComparisonBoard = () => (
+    permission.canViewRecheckCompare && (
+      <section className="comparison-board panel">
+        <div className="section-heading">
+          <div>
+            <p>处方分析</p>
+            <h2>处方对比看板</h2>
+          </div>
+          <div className="comparison-filter-tabs">
+            <button
+              className={comparisonFilter === "all" ? "tab-active" : ""}
+              onClick={() => setComparisonFilter("all")}
+            >
+              全部 ({comparisons.length})
+            </button>
+            <button
+              className={comparisonFilter === "myopia-progress" ? "tab-active tab-progress" : ""}
+              onClick={() => setComparisonFilter("myopia-progress")}
+            >
+              近视进展 ({myopiaProgress.length})
+            </button>
+            <button
+              className={comparisonFilter === "astigmatism-change" ? "tab-active tab-astigmatism" : ""}
+              onClick={() => setComparisonFilter("astigmatism-change")}
+            >
+              散光变化 ({astigmatismChange.length})
+            </button>
+            <button
+              className={comparisonFilter === "stable" ? "tab-active tab-stable" : ""}
+              onClick={() => setComparisonFilter("stable")}
+            >
+              处方稳定 ({stable.length})
+            </button>
+          </div>
+        </div>
+        <div className="comparison-list">
+          {filteredComparisons.length > 0 ? (
+            filteredComparisons.slice(0, 4).map((comparison, index) => (
+              <ComparisonCard
+                key={`${comparison.prevRecord.id}-${comparison.currRecord.id}`}
+                comparison={comparison}
+                index={index}
+                onClick={() => openComparisonDrawer(comparison)}
+                canViewProfessionalParams={permission.canViewProfessionalParams}
+              />
+            ))
+          ) : (
+            <div className="empty-state">
+              <p>暂无对比数据</p>
+              <p className="empty-hint">同一患者需至少两条验光记录才能进行对比</p>
+            </div>
+          )}
+          {filteredComparisons.length > 4 && (
+            <div style={{ textAlign: "center", marginTop: "12px" }}>
+              <button
+                className="ghost-btn"
+                onClick={() => setCurrentStep("recheck-compare")}
+              >
+                查看全部 {filteredComparisons.length} 条对比 →
+              </button>
+            </div>
+          )}
+        </div>
+      </section>
+    )
+  );
+
+  const renderLensRecommendation = () => (
+    permission.canGenerateLensRecommendation && (
+      <section className="lens-recommendation-panel panel">
+        <div className="section-heading">
+          <div>
+            <p>门店顾问工具</p>
+            <h2>配镜建议生成</h2>
+          </div>
           {!showLensRecommendation && (
-            <div className="recommendation-collapsed-hint">
-              <p>根据年龄段、屈光参数、用镜类型等信息，快速生成初步配镜建议</p>
-              <p className="empty-hint">适用于门店顾问为患者提供参考建议，不替代医疗诊断</p>
-            </div>
+            <button className="primary-action" onClick={openLensRecommendation}>
+              开启建议生成
+            </button>
           )}
-        </section>
-      )}
+          {showLensRecommendation && (
+            <button className="ghost-btn" onClick={closeLensRecommendation}>
+              收起
+            </button>
+          )}
+        </div>
 
-      <section className="workspace">
-        <aside className="panel narrow">
-          <h2>当前角色</h2>
-          <div className="chips">
-            {Object.entries(ROLE_LABELS).map(([key, label]) => (
-              <button
-                key={key}
-                className={currentRole === key ? "chip-active" : ""}
-                onClick={() => setCurrentRole(key as UserRole)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <h2>筛选</h2>
-          <div className="chips muted">
-            {project.filters.map((filter: string) => (
-              <button
-                key={filter}
-                className={patientFilter === filter ? "chip-active" : ""}
-                onClick={() => setPatientFilter(patientFilter === filter ? "" : filter)}
-              >
-                {filter}
-              </button>
-            ))}
-          </div>
-          <h2>快速搜索</h2>
-          <input
-            type="text"
-            placeholder="搜索患者编号、备注..."
-            value={patientFilter}
-            onChange={e => setPatientFilter(e.target.value)}
-          />
-        </aside>
-
-        <section className="panel">
-          <div className="section-heading">
-            <div>
-              <p>{project.domain}</p>
-              <h2>记录字段</h2>
-            </div>
-            {permission.canEditInitialExam && (
-              <button className="primary-action" onClick={openPrescriptionForm}>新增处方记录</button>
+        {showLensRecommendation && (
+          <div className="recommendation-content">
+            {lensRecommendationResult ? (
+              <LensRecommendationResultDisplay
+                result={lensRecommendationResult}
+                onReset={resetLensRecommendation}
+              />
+            ) : (
+              <LensRecommendationForm onGenerate={handleLensRecommendationGenerate} />
             )}
           </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field + " · 请使用上方新增处方"} readOnly />
-              </label>
-            ))}
+        )}
+
+        {!showLensRecommendation && (
+          <div className="recommendation-collapsed-hint">
+            <p>根据年龄段、屈光参数、用镜类型等信息，快速生成初步配镜建议</p>
+            <p className="empty-hint">适用于门店顾问为患者提供参考建议，不替代医疗诊断</p>
           </div>
-        </section>
+        )}
       </section>
-    </>
+    )
   );
+
+  const renderFieldWorkspace = () => (
+    <section className="workspace">
+      <aside className="panel narrow">
+        <h2>当前角色</h2>
+        <div className="chips">
+          {Object.entries(ROLE_LABELS).map(([key, label]) => (
+            <button
+              key={key}
+              className={currentRole === key ? "chip-active" : ""}
+              onClick={() => setCurrentRole(key as UserRole)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <h2>筛选</h2>
+        <div className="chips muted">
+          {project.filters.map((filter: string) => (
+            <button
+              key={filter}
+              className={patientFilter === filter ? "chip-active" : ""}
+              onClick={() => setPatientFilter(patientFilter === filter ? "" : filter)}
+            >
+              {filter}
+            </button>
+          ))}
+        </div>
+        <h2>快速搜索</h2>
+        <input
+          type="text"
+          placeholder="搜索患者编号、备注..."
+          value={patientFilter}
+          onChange={e => setPatientFilter(e.target.value)}
+        />
+      </aside>
+
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <p>{project.domain}</p>
+            <h2>记录字段</h2>
+          </div>
+          {permission.canEditInitialExam && (
+            <button className="primary-action" onClick={openPrescriptionForm}>新增处方记录</button>
+          )}
+        </div>
+        <div className="field-grid">
+          {project.fields.map((field: string) => (
+            <label key={field}>
+              <span>{field}</span>
+              <input placeholder={"填写" + field + " · 请使用上方新增处方"} readOnly />
+            </label>
+          ))}
+        </div>
+      </section>
+    </section>
+  );
+
+  const renderDashboard = () => {
+    const sectionComponents: Record<DashboardSection, JSX.Element | null> = {
+      "metrics": (
+        <section key="metrics" className="metrics-grid">
+          {metricLabels.map((metric: string, index: number) => (
+            <MetricCard key={metric} label={metric} value={metricValues[index]} index={index} />
+          ))}
+        </section>
+      ),
+      "reminder": <div key="reminder">{renderReminderBoard()}</div>,
+      "comparison": <div key="comparison">{renderComparisonBoard()}</div>,
+      "lens-recommendation": <div key="lens">{renderLensRecommendation()}</div>,
+      "field-workspace": <div key="workspace">{renderFieldWorkspace()}</div>
+    };
+
+    return (
+      <>
+        {renderRoleWelcome()}
+        {roleConfig.dashboardSections.map((section) => (
+          sectionComponents[section]
+        ))}
+      </>
+    );
+  };
 
   const renderPatientProfile = () => (
     <section className="panel">
@@ -4197,6 +4402,7 @@ function App() {
               comparison={comparison}
               index={index}
               onClick={() => openComparisonDrawer(comparison)}
+              canViewProfessionalParams={permission.canViewProfessionalParams}
             />
           ))
         ) : (
@@ -4519,11 +4725,15 @@ function App() {
         record={selectedRecord}
         open={drawerOpen}
         onClose={closeDrawer}
+        canViewProfessionalParams={permission.canViewProfessionalParams}
+        canViewDetailedRecords={permission.canViewDetailedRecords}
       />
       <ComparisonDrawer
         comparison={selectedComparison}
         open={comparisonDrawerOpen}
         onClose={closeComparisonDrawer}
+        canViewProfessionalParams={permission.canViewProfessionalParams}
+        canViewDetailedRecords={permission.canViewDetailedRecords}
       />
 
       {showClearConfirm && (

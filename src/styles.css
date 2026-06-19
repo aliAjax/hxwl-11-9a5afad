@@ -2381,6 +2381,229 @@ button:disabled {
   font-weight: 600;
 }
 
+.role-welcome {
+  background: linear-gradient(135deg, #f0f9ff 0%, #ecfeff 100%);
+  border-radius: 16px;
+  padding: 28px;
+  margin-bottom: 24px;
+  border: 1px solid #bae6fd;
+  position: relative;
+  overflow: hidden;
+}
+
+.role-welcome::before {
+  content: "";
+  position: absolute;
+  top: -50%;
+  right: -10%;
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle, rgba(6, 182, 212, 0.1) 0%, transparent 70%);
+  border-radius: 50%;
+}
+
+.role-welcome-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  position: relative;
+  z-index: 1;
+}
+
+.role-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  background: white;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.role-info h2 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.role-description {
+  margin: 0;
+  font-size: 14px;
+  color: #64748b;
+}
+
+.role-date {
+  margin-left: auto;
+  font-size: 13px;
+  color: #94a3b8;
+  position: relative;
+  z-index: 1;
+}
+
+.role-quick-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  position: relative;
+  z-index: 1;
+}
+
+.role-quick-label {
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.role-quick-btns {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.quick-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: white;
+  color: #0ea5e9;
+  border: 1px solid #bae6fd;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.quick-action-btn:hover {
+  background: #f0f9ff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.15);
+}
+
+.quick-action-btn.primary {
+  background: linear-gradient(135deg, #0ea5e9, #06b6d4);
+  color: white;
+  border: none;
+}
+
+.quick-action-btn.primary:hover {
+  box-shadow: 0 4px 16px rgba(14, 165, 233, 0.3);
+}
+
+.quick-action-icon {
+  font-size: 15px;
+}
+
+.quick-action-text {
+  font-size: 13px;
+}
+
+.param-restricted-hint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #f8fafc;
+  border: 1px dashed #e2e8f0;
+  border-radius: 8px;
+}
+
+.param-restricted-icon {
+  font-size: 20px;
+}
+
+.param-restricted-text {
+  margin: 0;
+  font-size: 13px;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+.recommendation-summary {
+  color: #475569;
+  font-weight: 500;
+}
+
+.role-theme-optometrist {
+  background: linear-gradient(135deg, #f0f9ff 0%, #ecfeff 100%);
+  border-color: #bae6fd;
+}
+
+.role-theme-optometrist .role-label {
+  color: #0ea5e9;
+}
+
+.role-theme-optometrist .quick-action-btn {
+  color: #0ea5e9;
+  border-color: #bae6fd;
+}
+
+.role-theme-optometrist .quick-action-btn:hover {
+  background: #f0f9ff;
+}
+
+.role-theme-optometrist .quick-action-btn.primary {
+  background: linear-gradient(135deg, #0ea5e9, #06b6d4);
+  color: white;
+  border: none;
+}
+
+.role-theme-advisor {
+  background: linear-gradient(135deg, #f0fdf4 0%, #fefce8 100%);
+  border-color: #bbf7d0;
+}
+
+.role-theme-advisor .role-label {
+  color: #16a34a;
+}
+
+.role-theme-advisor .quick-action-btn {
+  color: #16a34a;
+  border-color: #bbf7d0;
+}
+
+.role-theme-advisor .quick-action-btn:hover {
+  background: #f0fdf4;
+}
+
+.role-theme-advisor .quick-action-btn.primary {
+  background: linear-gradient(135deg, #22c55e, #84cc16);
+  color: white;
+  border: none;
+}
+
+.role-theme-review-doctor {
+  background: linear-gradient(135deg, #faf5ff 0%, #fdf4ff 100%);
+  border-color: #e9d5ff;
+}
+
+.role-theme-review-doctor .role-label {
+  color: #9333ea;
+}
+
+.role-theme-review-doctor .quick-action-btn {
+  color: #9333ea;
+  border-color: #e9d5ff;
+}
+
+.role-theme-review-doctor .quick-action-btn:hover {
+  background: #faf5ff;
+}
+
+.role-theme-review-doctor .quick-action-btn.primary {
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  color: white;
+  border: none;
+}
+
 @media (max-width: 960px) {
   .workflow-nav {
     grid-template-columns: repeat(3, 1fr);
