@@ -642,6 +642,90 @@ input {
   color: #475569;
   border: 1px solid #cbd5e1;
   font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.tag-cycle:hover {
+  background: #e2e8f0;
+  border-color: #94a3b8;
+}
+
+.tag-cycle.cycle-custom {
+  background: #ede9fe;
+  color: #6d28d9;
+  border-color: #c4b5fd;
+}
+
+.tag-cycle.cycle-custom:hover {
+  background: #ddd6fe;
+}
+
+.tag-cycle.tag-editing {
+  cursor: default;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+}
+
+.tag-cycle.tag-editing input {
+  width: 56px;
+  padding: 2px 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 11px;
+  background: #fff;
+  color: #172033;
+  outline: none;
+}
+
+.tag-cycle.tag-editing input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.cycle-btn {
+  border: none;
+  background: transparent;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.cycle-btn.cycle-ok {
+  color: #059669;
+}
+
+.cycle-btn.cycle-ok:hover {
+  background: #d1fae5;
+}
+
+.cycle-btn.cycle-cancel {
+  color: #64748b;
+}
+
+.cycle-btn.cycle-cancel:hover {
+  background: #e2e8f0;
+}
+
+.cycle-reset-btn {
+  border: 1px solid #fca5a5;
+  background: #fff1f2;
+  color: #dc2626;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  line-height: 1.6;
+}
+
+.cycle-reset-btn:hover {
+  background: #ffe4e6;
+  border-color: #f87171;
 }
 
 .reminder-dates {

@@ -1857,10 +1857,16 @@ function PatientCard({
 
 function ReminderCard({
   reminder,
-  index
+  index,
+  isCustom,
+  onCycleChange,
+  onCycleReset
 }: {
   reminder: PatientReminder;
   index: number;
+  isCustom: boolean;
+  onCycleChange: (days: number) => void;
+  onCycleReset: () => void;
 }) {
   const statusConfig = {
     overdue: { label: "已逾期", className: "status-danger", textClass: "text-danger", daysText: `逾期 ${Math.abs(reminder.daysUntilNext)} 天` },
@@ -1869,6 +1875,27 @@ function ReminderCard({
   };
 
   const config = statusConfig[reminder.reminderStatus];
+  const [editingCycle, setEditingCycle] = useState(false);
+  const [cycleInput, setCycleInput] = useState(String(reminder.reminderCycle));
+
+  useEffect(() => {
+    setCycleInput(String(reminder.reminderCycle));
+  }, [reminder.reminderCycle]);
+
+  const handleSaveCycle = () => {
+    const days = parseInt(cycleInput, 10);
+    if (!isNaN(days) && days >= 1 && days <= 3650) {
+      onCycleChange(days);
+    } else {
+      setCycleInput(String(reminder.reminderCycle));
+    }
+    setEditingCycle(false);
+  };
+
+  const handleCancelCycle = () => {
+    setCycleInput(String(reminder.reminderCycle));
+    setEditingCycle(false);
+  };
 
   return (
     <article className={`reminder-card reminder-${reminder.reminderStatus}`}>
@@ -1881,7 +1908,36 @@ function ReminderCard({
         <div className="reminder-tags">
           {reminder.ageGroup && <span className="tag tag-primary">{reminder.ageGroup}</span>}
           {reminder.lensType && <span className="tag tag-accent">{reminder.lensType}</span>}
-          <span className="tag tag-cycle">周期 {reminder.reminderCycle} 天</span>
+          {editingCycle ? (
+            <span className="tag tag-cycle tag-editing">
+              <input
+                type="number"
+                min="1"
+                max="3650"
+                value={cycleInput}
+                autoFocus
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => setCycleInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveCycle();
+                  if (e.key === "Escape") handleCancelCycle();
+                  e.stopPropagation();
+                }}
+              />
+              <span>天</span>
+              <button className="cycle-btn cycle-ok" onClick={(e) => { e.stopPropagation(); handleSaveCycle(); }}>✓</button>
+              <button className="cycle-btn cycle-cancel" onClick={(e) => { e.stopPropagation(); handleCancelCycle(); }}>✗</button>
+            </span>
+          ) : (
+            <span className={`tag tag-cycle ${isCustom ? "cycle-custom" : ""}`} onClick={(e) => { e.stopPropagation(); setEditingCycle(true); }} title="点击修改复查周期">
+              周期 {reminder.reminderCycle} 天{isCustom ? " · 自定义" : ""}
+            </span>
+          )}
+          {isCustom && !editingCycle && (
+            <button className="cycle-reset-btn" onClick={(e) => { e.stopPropagation(); onCycleReset(); }} title="恢复默认周期">
+              重置
+            </button>
+          )}
         </div>
         <div className="reminder-dates">
           <p className="reminder-date">上次复查：{reminder.lastCheckDate}</p>
@@ -3133,9 +3189,23 @@ function App() {
   };
 
   const handleDelete = (id: string) => {
-    if (!window.confirm("确定要删除该患者档案吗？")) return;
+    if (!window.confirm("确定要删除该患者档案吗？关联的验光记录和复查周期设置也会一并删除。")) return;
+    const targetPatient = patients.find(p => p.id === id);
+    const targetPatientNo = targetPatient?.patientNo;
     setPatients(prev => prev.filter(p => p.id !== id));
+    if (targetPatientNo) {
+      setRecords(prev => prev.filter(r => r.patientNo !== targetPatientNo));
+      setCustomCycles(prev => {
+        const next = { ...prev };
+        delete next[targetPatientNo];
+        return next;
+      });
+    }
     if (editingId === id) setEditingId(null);
+    if (selectedRecord && targetPatientNo && selectedRecord.patientNo === targetPatientNo) {
+      setSelectedRecord(null);
+      setDrawerOpen(false);
+    }
   };
 
   const startEdit = (patient: PatientProfile) => {
@@ -3208,6 +3278,18 @@ function App() {
     setLensRecommendationResult(null);
   };
 
+  const handleSetCustomCycle = (patientNo: string, days: number | null) => {
+    setCustomCycles(prev => {
+      const next = { ...prev };
+      if (days && days > 0) {
+        next[patientNo] = days;
+      } else {
+        delete next[patientNo];
+      }
+      return next;
+    });
+  };
+
   const editingPatient = patients.find(p => p.id === editingId);
 
   return (
@@ -3272,7 +3354,14 @@ function App() {
             <div className="reminder-list">
               {overdue.length > 0 ? (
                 overdue.map((reminder, index) => (
-                  <ReminderCard key={reminder.id} reminder={reminder} index={index} />
+                  <ReminderCard
+                    key={reminder.id}
+                    reminder={reminder}
+                    index={index}
+                    isCustom={!!customCycles[reminder.patientNo]}
+                    onCycleChange={(days) => handleSetCustomCycle(reminder.patientNo, days)}
+                    onCycleReset={() => handleSetCustomCycle(reminder.patientNo, null)}
+                  />
                 ))
               ) : (
                 <div className="empty-state small">
@@ -3290,7 +3379,14 @@ function App() {
             <div className="reminder-list">
               {upcoming.length > 0 ? (
                 upcoming.map((reminder, index) => (
-                  <ReminderCard key={reminder.id} reminder={reminder} index={index} />
+                  <ReminderCard
+                    key={reminder.id}
+                    reminder={reminder}
+                    index={index}
+                    isCustom={!!customCycles[reminder.patientNo]}
+                    onCycleChange={(days) => handleSetCustomCycle(reminder.patientNo, days)}
+                    onCycleReset={() => handleSetCustomCycle(reminder.patientNo, null)}
+                  />
                 ))
               ) : (
                 <div className="empty-state small">
@@ -3308,7 +3404,14 @@ function App() {
             <div className="reminder-list">
               {normal.length > 0 ? (
                 normal.map((reminder, index) => (
-                  <ReminderCard key={reminder.id} reminder={reminder} index={index} />
+                  <ReminderCard
+                    key={reminder.id}
+                    reminder={reminder}
+                    index={index}
+                    isCustom={!!customCycles[reminder.patientNo]}
+                    onCycleChange={(days) => handleSetCustomCycle(reminder.patientNo, days)}
+                    onCycleReset={() => handleSetCustomCycle(reminder.patientNo, null)}
+                  />
                 ))
               ) : (
                 <div className="empty-state small">
