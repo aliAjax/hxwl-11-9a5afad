@@ -221,6 +221,22 @@ const initialPatients: PatientProfile[] = [
     lensType: "单光镜",
     lastCheckDate: "2026-06-10",
     remark: "近视度数稳定"
+  },
+  {
+    id: "p-013",
+    patientNo: "Patient-666",
+    ageGroup: "成人",
+    lensType: "单光镜",
+    lastCheckDate: "2026-05-20",
+    remark: "矫正视力提升，屈光度数稳定"
+  },
+  {
+    id: "p-014",
+    patientNo: "Patient-777",
+    ageGroup: "儿童",
+    lensType: "角膜塑形镜",
+    lastCheckDate: "2026-05-25",
+    remark: "OK镜塑形效果良好，曲率变平"
   }
 ];
 
@@ -456,10 +472,74 @@ const refractionRecords: RefractionRecord[] = [
     pd: "62",
     cornealCurvature: { right: { horizontal: "42.75", vertical: "43.50" }, left: { horizontal: "43.00", vertical: "43.75" } },
     recommendation: "花眼症状明显，渐进片初配，需适应期2-4周，建议室内外各备一副眼镜。"
+  },
+  {
+    id: "r-008",
+    patientNo: "Patient-666",
+    category: "成人近视",
+    type: "初配",
+    summary: "右眼-3.00DS/-0.50DC×180°，左眼-2.75DS/-0.50DC×175°，PD 62mm",
+    patientName: "孙晓燕",
+    ageGroup: "成人",
+    gender: "女",
+    examDate: "2026-01-20",
+    rightEye: { nakedVision: "0.2", correctedVision: "0.8", sphere: "-3.00", cylinder: "-0.50", axis: "180", add: "" },
+    leftEye: { nakedVision: "0.25", correctedVision: "0.8", sphere: "-2.75", cylinder: "-0.50", axis: "175", add: "" },
+    pd: "62",
+    cornealCurvature: { right: { horizontal: "43.00", vertical: "44.00" }, left: { horizontal: "43.25", vertical: "44.25" } },
+    recommendation: "双眼矫正视力0.8，略低于正常，建议进一步检查眼底，排除弱视可能，半年后复查。"
+  },
+  {
+    id: "r-008b",
+    patientNo: "Patient-666",
+    category: "成人近视",
+    type: "复查",
+    summary: "右眼-3.00DS/-0.50DC×180°，左眼-2.75DS/-0.50DC×175°，PD 62mm",
+    patientName: "孙晓燕",
+    ageGroup: "成人",
+    gender: "女",
+    examDate: "2026-05-20",
+    rightEye: { nakedVision: "0.2", correctedVision: "1.0", sphere: "-3.00", cylinder: "-0.50", axis: "180", add: "" },
+    leftEye: { nakedVision: "0.25", correctedVision: "1.0", sphere: "-2.75", cylinder: "-0.50", axis: "175", add: "" },
+    pd: "62",
+    cornealCurvature: { right: { horizontal: "43.00", vertical: "44.00" }, left: { horizontal: "43.25", vertical: "44.25" } },
+    recommendation: "矫正视力提升至1.0，屈光度数稳定，建议半年后复查。"
+  },
+  {
+    id: "r-009",
+    patientNo: "Patient-777",
+    category: "角膜塑形镜",
+    type: "初配",
+    summary: "右眼-2.50DS/-0.75DC×90°，左眼-2.25DS/-0.75DC×85°，PD 60mm",
+    patientName: "钱天佑",
+    ageGroup: "儿童",
+    gender: "男",
+    examDate: "2026-02-25",
+    rightEye: { nakedVision: "0.3", correctedVision: "1.0", sphere: "-2.50", cylinder: "-0.75", axis: "90", add: "" },
+    leftEye: { nakedVision: "0.3", correctedVision: "1.0", sphere: "-2.25", cylinder: "-0.75", axis: "85", add: "" },
+    pd: "60",
+    cornealCurvature: { right: { horizontal: "42.50", vertical: "43.50" }, left: { horizontal: "42.75", vertical: "43.75" } },
+    recommendation: "OK镜初配，曲率偏高，需密切随访角膜形态变化，1周后首次复查。"
+  },
+  {
+    id: "r-009b",
+    patientNo: "Patient-777",
+    category: "角膜塑形镜",
+    type: "复查",
+    summary: "右眼-2.50DS/-0.75DC×90°，左眼-2.25DS/-0.75DC×85°，PD 60mm",
+    patientName: "钱天佑",
+    ageGroup: "儿童",
+    gender: "男",
+    examDate: "2026-05-25",
+    rightEye: { nakedVision: "0.8", correctedVision: "1.0", sphere: "-2.50", cylinder: "-0.75", axis: "90", add: "" },
+    leftEye: { nakedVision: "0.8", correctedVision: "1.0", sphere: "-2.25", cylinder: "-0.75", axis: "85", add: "" },
+    pd: "60",
+    cornealCurvature: { right: { horizontal: "42.00", vertical: "43.00" }, left: { horizontal: "42.25", vertical: "43.25" } },
+    recommendation: "OK镜配戴3个月，角膜曲率变平0.50D，塑形效果良好，屈光度数稳定，建议3个月后复查。"
   }
 ];
 
-type ComparisonCategory = "myopia-progress" | "astigmatism-change" | "stable";
+type ComparisonCategory = "myopia-progress" | "astigmatism-change" | "vision-change" | "curvature-change" | "stable";
 
 interface EyeComparison {
   sphere: { prev: string; curr: string; diff: number; changed: boolean };
@@ -498,6 +578,8 @@ const CURVATURE_CHANGE_THRESHOLD = 0.25;
 const categoryConfig: Record<ComparisonCategory, { label: string; className: string; dotClass: string }> = {
   "myopia-progress": { label: "近视进展", className: "cat-progress", dotClass: "dot-progress" },
   "astigmatism-change": { label: "散光变化", className: "cat-astigmatism", dotClass: "dot-astigmatism" },
+  "vision-change": { label: "视力变化", className: "cat-vision", dotClass: "dot-vision" },
+  "curvature-change": { label: "曲率变化", className: "cat-curvature", dotClass: "dot-curvature" },
   "stable": { label: "处方稳定", className: "cat-stable", dotClass: "dot-stable" },
 };
 
@@ -527,15 +609,24 @@ function compareCurvature(prev: EyeCurvature, curr: EyeCurvature): CurvatureComp
   };
 }
 
-function classifyComparison(result: { rightEye: EyeComparison; leftEye: EyeComparison }): ComparisonCategory {
-  const sphereChanged = result.rightEye.sphere.changed || result.leftEye.sphere.changed;
-  const cylinderChanged = result.rightEye.cylinder.changed || result.leftEye.cylinder.changed;
-  const axisChanged = result.rightEye.axis.changed || result.leftEye.axis.changed;
-
+function classifyComparison(result: {
+  rightEye: EyeComparison;
+  leftEye: EyeComparison;
+  cornealCurvature: { right: CurvatureComparison; left: CurvatureComparison };
+}): ComparisonCategory {
   const myopiaProgressed = (
     (result.rightEye.sphere.diff < 0 && Math.abs(result.rightEye.sphere.diff) >= SPHERE_CHANGE_THRESHOLD) ||
     (result.leftEye.sphere.diff < 0 && Math.abs(result.leftEye.sphere.diff) >= SPHERE_CHANGE_THRESHOLD)
   );
+
+  const cylinderChanged = result.rightEye.cylinder.changed || result.leftEye.cylinder.changed;
+  const axisChanged = result.rightEye.axis.changed || result.leftEye.axis.changed;
+  const visionChanged = result.rightEye.correctedVision.changed || result.leftEye.correctedVision.changed;
+  const curvatureChanged =
+    result.cornealCurvature.right.horizontal.changed ||
+    result.cornealCurvature.right.vertical.changed ||
+    result.cornealCurvature.left.horizontal.changed ||
+    result.cornealCurvature.left.vertical.changed;
 
   if (myopiaProgressed) {
     return "myopia-progress";
@@ -543,13 +634,23 @@ function classifyComparison(result: { rightEye: EyeComparison; leftEye: EyeCompa
   if (cylinderChanged || axisChanged) {
     return "astigmatism-change";
   }
+  if (visionChanged) {
+    return "vision-change";
+  }
+  if (curvatureChanged) {
+    return "curvature-change";
+  }
   return "stable";
 }
 
 function comparePrescriptions(prevRecord: RefractionRecord, currRecord: RefractionRecord): PrescriptionComparisonResult {
   const rightEye = compareEyeRefraction(prevRecord.rightEye, currRecord.rightEye);
   const leftEye = compareEyeRefraction(prevRecord.leftEye, currRecord.leftEye);
-  const category = classifyComparison({ rightEye, leftEye });
+  const cornealCurvature = {
+    right: compareCurvature(prevRecord.cornealCurvature.right, currRecord.cornealCurvature.right),
+    left: compareCurvature(prevRecord.cornealCurvature.left, currRecord.cornealCurvature.left),
+  };
+  const category = classifyComparison({ rightEye, leftEye, cornealCurvature });
 
   const prevDate = parseLocalDate(prevRecord.examDate);
   const currDate = parseLocalDate(currRecord.examDate);
@@ -562,10 +663,7 @@ function comparePrescriptions(prevRecord: RefractionRecord, currRecord: Refracti
     currRecord,
     rightEye,
     leftEye,
-    cornealCurvature: {
-      right: compareCurvature(prevRecord.cornealCurvature.right, currRecord.cornealCurvature.right),
-      left: compareCurvature(prevRecord.cornealCurvature.left, currRecord.cornealCurvature.left),
-    },
+    cornealCurvature,
     category,
     categoryLabel: categoryConfig[category].label,
     daysBetween,
@@ -1641,6 +1739,51 @@ function ComparisonCard({
               decimals={0}
             />
           </span>
+          <span className="summary-item">
+            <span className="summary-label">矫正视力</span>
+            <DiffBadge
+              diff={Math.abs(comparison.rightEye.correctedVision.diff) >= Math.abs(comparison.leftEye.correctedVision.diff)
+                ? comparison.rightEye.correctedVision.diff
+                : comparison.leftEye.correctedVision.diff}
+              changed={comparison.rightEye.correctedVision.changed || comparison.leftEye.correctedVision.changed}
+            />
+          </span>
+          <span className="summary-item">
+            <span className="summary-label">角膜曲率</span>
+            <DiffBadge
+              diff={Math.max(
+                Math.abs(comparison.cornealCurvature.right.horizontal.diff),
+                Math.abs(comparison.cornealCurvature.right.vertical.diff),
+                Math.abs(comparison.cornealCurvature.left.horizontal.diff),
+                Math.abs(comparison.cornealCurvature.left.vertical.diff)
+              ) * (
+                Math.abs(comparison.cornealCurvature.right.horizontal.diff) >=
+                Math.max(
+                  Math.abs(comparison.cornealCurvature.right.vertical.diff),
+                  Math.abs(comparison.cornealCurvature.left.horizontal.diff),
+                  Math.abs(comparison.cornealCurvature.left.vertical.diff)
+                )
+                  ? Math.sign(comparison.cornealCurvature.right.horizontal.diff)
+                  : Math.abs(comparison.cornealCurvature.right.vertical.diff) >=
+                    Math.max(
+                      Math.abs(comparison.cornealCurvature.left.horizontal.diff),
+                      Math.abs(comparison.cornealCurvature.left.vertical.diff)
+                    )
+                  ? Math.sign(comparison.cornealCurvature.right.vertical.diff)
+                  : Math.abs(comparison.cornealCurvature.left.horizontal.diff) >=
+                    Math.abs(comparison.cornealCurvature.left.vertical.diff)
+                  ? Math.sign(comparison.cornealCurvature.left.horizontal.diff)
+                  : Math.sign(comparison.cornealCurvature.left.vertical.diff)
+              )}
+              changed={
+                comparison.cornealCurvature.right.horizontal.changed ||
+                comparison.cornealCurvature.right.vertical.changed ||
+                comparison.cornealCurvature.left.horizontal.changed ||
+                comparison.cornealCurvature.left.vertical.changed
+              }
+              unit="D"
+            />
+          </span>
         </div>
       </div>
     </article>
@@ -1882,10 +2025,12 @@ function App() {
 
   const comparisons = useMemo(() => getAllComparisons(records), [records]);
 
-  const { myopiaProgress, astigmatismChange, stable } = useMemo(() => {
+  const { myopiaProgress, astigmatismChange, visionChange, curvatureChange, stable } = useMemo(() => {
     return {
       myopiaProgress: comparisons.filter(c => c.category === "myopia-progress"),
       astigmatismChange: comparisons.filter(c => c.category === "astigmatism-change"),
+      visionChange: comparisons.filter(c => c.category === "vision-change"),
+      curvatureChange: comparisons.filter(c => c.category === "curvature-change"),
       stable: comparisons.filter(c => c.category === "stable"),
     };
   }, [comparisons]);
@@ -1899,6 +2044,8 @@ function App() {
     "患者总数",
     "近视进展",
     "散光变化",
+    "视力变化",
+    "曲率变化",
     "处方稳定",
   ];
 
@@ -1906,6 +2053,8 @@ function App() {
     String(patients.length),
     String(myopiaProgress.length),
     String(astigmatismChange.length),
+    String(visionChange.length),
+    String(curvatureChange.length),
     String(stable.length),
   ];
 
@@ -2079,6 +2228,18 @@ function App() {
               onClick={() => setComparisonFilter("astigmatism-change")}
             >
               散光变化 ({astigmatismChange.length})
+            </button>
+            <button
+              className={comparisonFilter === "vision-change" ? "tab-active tab-vision" : ""}
+              onClick={() => setComparisonFilter("vision-change")}
+            >
+              视力变化 ({visionChange.length})
+            </button>
+            <button
+              className={comparisonFilter === "curvature-change" ? "tab-active tab-curvature" : ""}
+              onClick={() => setComparisonFilter("curvature-change")}
+            >
+              曲率变化 ({curvatureChange.length})
             </button>
             <button
               className={comparisonFilter === "stable" ? "tab-active tab-stable" : ""}
