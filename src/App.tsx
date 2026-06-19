@@ -9,8 +9,11 @@ import {
   savePatients,
   saveRecords,
   saveFilters,
+  saveClearedFlag,
+  getClearedFlag,
   type AppData,
   type FilterState,
+  type ReminderData,
 } from "./db";
 
 export interface PatientProfile {
@@ -2921,15 +2924,27 @@ function App() {
   const [lensRecommendationResult, setLensRecommendationResult] = useState<LensRecommendationResult | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const reminders = useMemo(() => {
+    return patients
+      .filter(p => p.lastCheckDate)
+      .map(p => calculateReminder(p, today))
+      .sort((a, b) => a.daysUntilNext - b.daysUntilNext);
+  }, [patients, today]);
+
   const scheduleSave = useCallback((data: AppData) => {
     if (!dbSupported || !dbReady) return;
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
-    saveTimeoutRef.current = setTimeout(() => {
-      saveAllData(data).catch((err) => {
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await saveAllData(data);
+        if (data.patients.length > 0 || data.records.length > 0) {
+          await saveClearedFlag(false);
+        }
+      } catch (err) {
         console.error("自动保存失败:", err);
-      });
+      }
     }, 500);
   }, [dbSupported, dbReady]);
 
@@ -2948,12 +2963,17 @@ function App() {
         const db = await initDB();
         if (db) {
           setDbReady(true);
+          const wasCleared = await getClearedFlag();
           const persistedData = await getAllData();
           if (persistedData.patients.length > 0) {
             setPatients(persistedData.patients);
+          } else if (wasCleared) {
+            setPatients([]);
           }
           if (persistedData.records.length > 0) {
             setRecords(persistedData.records);
+          } else if (wasCleared) {
+            setRecords([]);
           }
           if (persistedData.filters.comparisonFilter) {
             setComparisonFilter(persistedData.filters.comparisonFilter as ComparisonCategory | "all");
@@ -2981,19 +3001,30 @@ function App() {
 
   useEffect(() => {
     if (!isLoading && dbSupported && dbReady) {
+      const reminderData: ReminderData[] = reminders.map(r => ({
+        id: r.id,
+        patientNo: r.patientNo,
+        reminderStatus: r.reminderStatus,
+        nextCheckDate: r.nextCheckDate,
+        daysUntilNext: r.daysUntilNext,
+        reminderCycle: r.reminderCycle,
+        customCycle: null,
+      }));
       scheduleSave({
         patients,
         records,
         filters: { comparisonFilter },
+        reminders: reminderData,
       });
     }
-  }, [patients, records, comparisonFilter, isLoading, dbSupported, dbReady, scheduleSave]);
+  }, [patients, records, comparisonFilter, reminders, isLoading, dbSupported, dbReady, scheduleSave]);
 
   const handleClearData = async () => {
     try {
       await clearAllData();
-      setPatients(initialPatients);
-      setRecords(refractionRecords);
+      await saveClearedFlag(true);
+      setPatients([]);
+      setRecords([]);
       setComparisonFilter("all");
       setShowClearConfirm(false);
     } catch (err) {
@@ -3018,13 +3049,6 @@ function App() {
   const closeComparisonDrawer = () => {
     setComparisonDrawerOpen(false);
   };
-
-  const reminders = useMemo(() => {
-    return patients
-      .filter(p => p.lastCheckDate)
-      .map(p => calculateReminder(p, today))
-      .sort((a, b) => a.daysUntilNext - b.daysUntilNext);
-  }, [patients, today]);
 
   const { overdue, upcoming, normal } = useMemo(() => {
     return {
@@ -3551,6 +3575,7 @@ function App() {
               <ul className="modal-warning-list">
                 <li>所有患者档案（{patients.length} 条）</li>
                 <li>所有验光记录（{records.length} 条）</li>
+                <li>所有复查提醒（{reminders.length} 条）</li>
                 <li>筛选条件设置</li>
               </ul>
               <p className="modal-warning-text strong">
