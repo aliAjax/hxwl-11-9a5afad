@@ -113,8 +113,8 @@ function formatLocalDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function calculateReminder(patient: PatientProfile, today: Date): PatientReminder {
-  const cycleDays = getReminderCycle(patient.ageGroup, patient.lensType);
+function calculateReminder(patient: PatientProfile, today: Date, customCycle?: number | null): PatientReminder {
+  const cycleDays = customCycle && customCycle > 0 ? customCycle : getReminderCycle(patient.ageGroup, patient.lensType);
   const lastCheck = parseLocalDate(patient.lastCheckDate);
   const nextCheck = new Date(lastCheck);
   nextCheck.setDate(lastCheck.getDate() + cycleDays);
@@ -2924,12 +2924,14 @@ function App() {
   const [lensRecommendationResult, setLensRecommendationResult] = useState<LensRecommendationResult | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [customCycles, setCustomCycles] = useState<Record<string, number>>({});
+
   const reminders = useMemo(() => {
     return patients
       .filter(p => p.lastCheckDate)
-      .map(p => calculateReminder(p, today))
+      .map(p => calculateReminder(p, today, customCycles[p.patientNo]))
       .sort((a, b) => a.daysUntilNext - b.daysUntilNext);
-  }, [patients, today]);
+  }, [patients, today, customCycles]);
 
   const scheduleSave = useCallback((data: AppData) => {
     if (!dbSupported || !dbReady) return;
@@ -2978,6 +2980,15 @@ function App() {
           if (persistedData.filters.comparisonFilter) {
             setComparisonFilter(persistedData.filters.comparisonFilter as ComparisonCategory | "all");
           }
+          if (persistedData.reminders.length > 0) {
+            const cycleMap: Record<string, number> = {};
+            persistedData.reminders.forEach(r => {
+              if (r.customCycle && r.customCycle > 0) {
+                cycleMap[r.patientNo] = r.customCycle;
+              }
+            });
+            setCustomCycles(cycleMap);
+          }
         }
       } catch (err) {
         console.error("数据库初始化失败:", err);
@@ -3008,7 +3019,7 @@ function App() {
         nextCheckDate: r.nextCheckDate,
         daysUntilNext: r.daysUntilNext,
         reminderCycle: r.reminderCycle,
-        customCycle: null,
+        customCycle: customCycles[r.patientNo] || null,
       }));
       scheduleSave({
         patients,
@@ -3017,7 +3028,7 @@ function App() {
         reminders: reminderData,
       });
     }
-  }, [patients, records, comparisonFilter, reminders, isLoading, dbSupported, dbReady, scheduleSave]);
+  }, [patients, records, comparisonFilter, reminders, customCycles, isLoading, scheduleSave, dbSupported, dbReady]);
 
   const handleClearData = async () => {
     try {
@@ -3027,6 +3038,17 @@ function App() {
       setRecords([]);
       setComparisonFilter("all");
       setShowClearConfirm(false);
+      setShowForm(false);
+      setEditingId(null);
+      setDrawerOpen(false);
+      setSelectedRecord(null);
+      setShowPrescriptionForm(false);
+      setShowImportForm(false);
+      setComparisonDrawerOpen(false);
+      setSelectedComparison(null);
+      setShowLensRecommendation(false);
+      setLensRecommendationResult(null);
+      setCustomCycles({});
     } catch (err) {
       console.error("清空数据失败:", err);
     }
