@@ -1,7 +1,19 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import "./styles.css";
+import {
+  initDB,
+  isIndexedDBSupported,
+  saveAllData,
+  getAllData,
+  clearAllData,
+  savePatients,
+  saveRecords,
+  saveFilters,
+  type AppData,
+  type FilterState,
+} from "./db";
 
-interface PatientProfile {
+export interface PatientProfile {
   id: string;
   patientNo: string;
   ageGroup: string;
@@ -10,9 +22,9 @@ interface PatientProfile {
   remark: string;
 }
 
-type ReminderStatus = "overdue" | "upcoming" | "normal";
+export type ReminderStatus = "overdue" | "upcoming" | "normal";
 
-interface EyeRefraction {
+export interface EyeRefraction {
   nakedVision: string;
   correctedVision: string;
   sphere: string;
@@ -21,17 +33,17 @@ interface EyeRefraction {
   add: string;
 }
 
-interface EyeCurvature {
+export interface EyeCurvature {
   horizontal: string;
   vertical: string;
 }
 
-interface CornealCurvature {
+export interface CornealCurvature {
   right: EyeCurvature;
   left: EyeCurvature;
 }
 
-interface RefractionRecord {
+export interface RefractionRecord {
   id: string;
   patientNo: string;
   category: string;
@@ -683,8 +695,8 @@ function validateAndBuildRecord(fields: string[], rowIndex: number): { record?: 
     errors.push(`左眼球镜：${validateSphere(leftSphere.trim())?.message}`);
   }
 
-  const hasRightCyl = rightCylinder && parseSafeNumber(rightCylinder.trim()) !== null && parseSafeNumber(rightCylinder.trim()) !== 0;
-  const hasLeftCyl = leftCylinder && parseSafeNumber(leftCylinder.trim()) !== null && parseSafeNumber(leftCylinder.trim()) !== 0;
+  const hasRightCyl = !!(rightCylinder && parseSafeNumber(rightCylinder.trim()) !== null && parseSafeNumber(rightCylinder.trim()) !== 0);
+  const hasLeftCyl = !!(leftCylinder && parseSafeNumber(leftCylinder.trim()) !== null && parseSafeNumber(leftCylinder.trim()) !== 0);
 
   if (rightCylinder && validateCylinder(rightCylinder.trim())) {
     errors.push(`右眼柱镜：${validateCylinder(rightCylinder.trim())?.message}`);
@@ -2889,6 +2901,10 @@ function ComparisonDrawer({
 }
 
 function App() {
+  const [dbSupported, setDbSupported] = useState<boolean | null>(null);
+  const [dbReady, setDbReady] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [patients, setPatients] = useState<PatientProfile[]>(initialPatients);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -2903,6 +2919,87 @@ function App() {
   const [comparisonFilter, setComparisonFilter] = useState<ComparisonCategory | "all">("all");
   const [showLensRecommendation, setShowLensRecommendation] = useState(false);
   const [lensRecommendationResult, setLensRecommendationResult] = useState<LensRecommendationResult | null>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleSave = useCallback((data: AppData) => {
+    if (!dbSupported || !dbReady) return;
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    saveTimeoutRef.current = setTimeout(() => {
+      saveAllData(data).catch((err) => {
+        console.error("自动保存失败:", err);
+      });
+    }, 500);
+  }, [dbSupported, dbReady]);
+
+  useEffect(() => {
+    const checkSupport = () => {
+      const supported = isIndexedDBSupported();
+      setDbSupported(supported);
+      if (!supported) {
+        setIsLoading(false);
+        return;
+      }
+    };
+
+    const init = async () => {
+      try {
+        const db = await initDB();
+        if (db) {
+          setDbReady(true);
+          const persistedData = await getAllData();
+          if (persistedData.patients.length > 0) {
+            setPatients(persistedData.patients);
+          }
+          if (persistedData.records.length > 0) {
+            setRecords(persistedData.records);
+          }
+          if (persistedData.filters.comparisonFilter) {
+            setComparisonFilter(persistedData.filters.comparisonFilter as ComparisonCategory | "all");
+          }
+        }
+      } catch (err) {
+        console.error("数据库初始化失败:", err);
+        setDbSupported(false);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    checkSupport();
+    if (isIndexedDBSupported()) {
+      init();
+    }
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isLoading && dbSupported && dbReady) {
+      scheduleSave({
+        patients,
+        records,
+        filters: { comparisonFilter },
+      });
+    }
+  }, [patients, records, comparisonFilter, isLoading, dbSupported, dbReady, scheduleSave]);
+
+  const handleClearData = async () => {
+    try {
+      await clearAllData();
+      setPatients(initialPatients);
+      setRecords(refractionRecords);
+      setComparisonFilter("all");
+      setShowClearConfirm(false);
+    } catch (err) {
+      console.error("清空数据失败:", err);
+    }
+  };
 
   const openDrawer = (record: RefractionRecord) => {
     setSelectedRecord(record);
@@ -3069,6 +3166,30 @@ function App() {
 
   return (
     <main className="app-shell">
+      {isLoading && (
+        <div className="loading-overlay">
+          <div className="loading-spinner"></div>
+          <p>正在加载数据...</p>
+        </div>
+      )}
+
+      {dbSupported === false && (
+        <div className="db-warning-banner">
+          <div className="warning-icon">⚠️</div>
+          <div className="warning-content">
+            <strong>浏览器不支持本地数据存储</strong>
+            <p>您的浏览器不支持 IndexedDB，数据将无法在页面刷新后保存。建议使用 Chrome、Firefox、Safari 或 Edge 等现代浏览器。</p>
+          </div>
+        </div>
+      )}
+
+      {dbSupported === true && dbReady && (
+        <div className="db-status-banner">
+          <span className="status-dot online"></span>
+          <span>本地数据已启用 · 刷新页面后数据将自动恢复</span>
+        </div>
+      )}
+
       <section className="hero">
         <div>
           <p className="eyebrow">{project.id} · port {project.port}</p>
@@ -3340,9 +3461,20 @@ function App() {
               <p>本地档案</p>
               <h2>患者档案</h2>
             </div>
-            {!showForm && !editingId && (
-              <button className="primary-action" onClick={openAddForm}>+ 新增档案</button>
-            )}
+            <div className="panel-actions">
+              {dbSupported && (
+                <button
+                  className="ghost-btn danger-btn"
+                  onClick={() => setShowClearConfirm(true)}
+                  disabled={isLoading}
+                >
+                  清空数据
+                </button>
+              )}
+              {!showForm && !editingId && (
+                <button className="primary-action" onClick={openAddForm}>+ 新增档案</button>
+              )}
+            </div>
           </div>
 
           {showForm && (
@@ -3403,6 +3535,39 @@ function App() {
         open={comparisonDrawerOpen}
         onClose={closeComparisonDrawer}
       />
+
+      {showClearConfirm && (
+        <div className="modal-overlay" onClick={() => setShowClearConfirm(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>确认清空所有数据</h3>
+              <button className="modal-close" onClick={() => setShowClearConfirm(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="modal-warning-icon">⚠️</div>
+              <p className="modal-warning-text">
+                此操作将永久删除所有本地存储的数据，包括：
+              </p>
+              <ul className="modal-warning-list">
+                <li>所有患者档案（{patients.length} 条）</li>
+                <li>所有验光记录（{records.length} 条）</li>
+                <li>筛选条件设置</li>
+              </ul>
+              <p className="modal-warning-text strong">
+                清空后数据将无法恢复，是否继续？
+              </p>
+            </div>
+            <div className="modal-actions">
+              <button className="ghost-btn" onClick={() => setShowClearConfirm(false)}>
+                取消
+              </button>
+              <button className="primary-action danger-btn" onClick={handleClearData}>
+                确认清空
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
