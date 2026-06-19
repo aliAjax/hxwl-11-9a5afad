@@ -12,6 +12,8 @@ export interface SyncMetadata {
   lastSyncedAt?: string;
   serverVersion?: number;
   localVersion: number;
+  submitCount: number;
+  isSubmitting: boolean;
   conflictData?: {
     serverData: any;
     localData: any;
@@ -240,6 +242,8 @@ export function createSyncableEntity<T extends { id: string }>(
     localVersion: 1,
     serverVersion: status === "synced" ? 1 : undefined,
     lastSyncedAt: status === "synced" ? new Date().toISOString() : undefined,
+    submitCount: 0,
+    isSubmitting: false,
   };
 }
 
@@ -249,6 +253,7 @@ export function markForSync<T extends SyncMetadata>(entity: T): T {
     syncStatus: "pending",
     localVersion: entity.localVersion + 1,
     lastSyncAttempt: new Date().toISOString(),
+    isSubmitting: false,
   };
 }
 
@@ -260,6 +265,7 @@ export function markSynced<T extends SyncMetadata>(entity: T, serverVersion: num
     lastSyncedAt: new Date().toISOString(),
     syncError: undefined,
     conflictData: undefined,
+    isSubmitting: false,
   };
 }
 
@@ -268,6 +274,16 @@ export function markFailed<T extends SyncMetadata>(entity: T, error: string): T 
     ...entity,
     syncStatus: "failed",
     syncError: error,
+    lastSyncAttempt: new Date().toISOString(),
+    isSubmitting: false,
+  };
+}
+
+export function markSubmitting<T extends SyncMetadata>(entity: T): T {
+  return {
+    ...entity,
+    isSubmitting: true,
+    submitCount: entity.submitCount + 1,
     lastSyncAttempt: new Date().toISOString(),
   };
 }
@@ -286,6 +302,7 @@ export function markConflict<T extends SyncMetadata>(
       conflictType,
     },
     lastSyncAttempt: new Date().toISOString(),
+    isSubmitting: false,
   };
 }
 
@@ -295,6 +312,7 @@ export function resolveConflictKeepLocal<T extends SyncMetadata>(entity: T): T {
     syncStatus: "pending",
     conflictData: undefined,
     localVersion: entity.localVersion + 1,
+    isSubmitting: false,
   };
 }
 
@@ -306,6 +324,8 @@ export function resolveConflictKeepServer<T extends SyncMetadata>(entity: T): T 
     conflictData: undefined,
     localVersion: entity.localVersion,
     lastSyncedAt: new Date().toISOString(),
+    submitCount: entity.submitCount,
+    isSubmitting: false,
   };
 }
 
@@ -331,4 +351,85 @@ export function formatSyncTime(isoString?: string): string {
   if (diffHours < 24) return `${diffHours} 小时前`;
   if (diffDays < 7) return `${diffDays} 天前`;
   return date.toLocaleDateString("zh-CN");
+}
+
+export interface FieldDiff {
+  field: string;
+  label: string;
+  localValue: any;
+  serverValue: any;
+  isDifferent: boolean;
+}
+
+const PATIENT_FIELD_LABELS: Record<string, string> = {
+  patientNo: "患者编号",
+  name: "姓名",
+  age: "年龄",
+  gender: "性别",
+  phone: "电话",
+  address: "地址",
+  ageGroup: "年龄段",
+  lensType: "镜片类型",
+  lastCheckDate: "上次检查日期",
+  remark: "备注",
+};
+
+const RECORD_FIELD_LABELS: Record<string, string> = {
+  patientNo: "患者编号",
+  patientName: "患者姓名",
+  examDate: "检查日期",
+  type: "类型",
+  summary: "摘要",
+  recommendation: "建议",
+  pd: "瞳距",
+};
+
+export function computeFieldDiffs(
+  type: EntityType,
+  localData: any,
+  serverData: any
+): FieldDiff[] {
+  const labelMap = type === "patient" ? PATIENT_FIELD_LABELS : RECORD_FIELD_LABELS;
+  const diffs: FieldDiff[] = [];
+
+  const allKeys = new Set([...Object.keys(labelMap)]);
+  for (const field of allKeys) {
+    const localVal = localData?.[field];
+    const serverVal = serverData?.[field];
+    const isDifferent = JSON.stringify(localVal) !== JSON.stringify(serverVal);
+    if (isDifferent || localVal !== undefined || serverVal !== undefined) {
+      diffs.push({
+        field,
+        label: labelMap[field] || field,
+        localValue: localVal ?? "—",
+        serverValue: serverVal ?? "—",
+        isDifferent,
+      });
+    }
+  }
+
+  if (type === "record" && localData?.leftEye && serverData?.leftEye) {
+    const eyeFields: Record<string, string> = {
+      sphere: "球镜(SPH)", cylinder: "柱镜(CYL)", axis: "轴位(AXI)",
+      vision: "裸眼视力", correctedVision: "矫正视力", add: "下加光(ADD)"
+    };
+    for (const [f, label] of Object.entries(eyeFields)) {
+      const lv = localData.leftEye?.[f];
+      const sv = serverData.leftEye?.[f];
+      const isDiff = JSON.stringify(lv) !== JSON.stringify(sv);
+      if (isDiff || lv !== undefined || sv !== undefined) {
+        diffs.push({ field: `leftEye.${f}`, label: `左眼 ${label}`, localValue: lv ?? "—", serverValue: sv ?? "—", isDifferent: isDiff });
+      }
+    }
+    for (const [f, label] of Object.entries(eyeFields)) {
+      const lv = localData.rightEye?.[f];
+      const sv = serverData.rightEye?.[f];
+      const isDiff = JSON.stringify(lv) !== JSON.stringify(sv);
+      if (isDiff || lv !== undefined || sv !== undefined) {
+        diffs.push({ field: `rightEye.${f}`, label: `右眼 ${label}`, localValue: lv ?? "—", serverValue: sv ?? "—", isDifferent: isDiff });
+      }
+    }
+  }
+
+  return diffs;
 }

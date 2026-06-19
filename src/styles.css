@@ -3336,6 +3336,257 @@ button:disabled {
   font-weight: 500;
 }
 
+/* ============ Record Sync Row ============ */
+.record-sync-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.record-sync-row.submitting {
+  opacity: 0.85;
+}
+
+.submit-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
+.submit-count-inline {
+  font-size: 10px;
+  opacity: 0.75;
+  margin-left: 2px;
+}
+
+.submitting-indicator {
+  cursor: wait;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ============ Reminder Sync ============ */
+.reminder-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.reminder-sync-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.reminder-sync-pending .reminder-index,
+.reminder-sync-failed .reminder-index,
+.reminder-sync-conflict .reminder-index {
+  font-size: 12px;
+}
+
+/* ============ Record Card Sync Borders ============ */
+.record-sync-pending {
+  border-left: 3px solid #f59e0b !important;
+}
+
+.record-sync-conflict {
+  border-left: 3px solid #ef4444 !important;
+}
+
+.record-sync-failed {
+  border-left: 3px solid #6b7280 !important;
+}
+
+/* ============ Prescription Sync ============ */
+.prescription-sync-pending {
+  border-left: 3px solid #f59e0b;
+}
+
+.prescription-sync-conflict {
+  border-left: 3px solid #ef4444;
+}
+
+.prescription-sync-failed {
+  border-left: 3px solid #6b7280;
+}
+
+/* ============ Export Sync ============ */
+.export-sync-pending,
+.export-sync-conflict,
+.export-sync-failed {
+  padding-left: 12px;
+}
+
+.export-sync-pending {
+  border-left: 3px solid #f59e0b;
+}
+
+.export-sync-conflict {
+  border-left: 3px solid #ef4444;
+}
+
+.export-sync-failed {
+  border-left: 3px solid #6b7280;
+}
+
+/* ============ Conflict Meta Row ============ */
+.conflict-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.conflict-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #334155;
+}
+
+.conflict-meta-sep {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.conflict-type-label {
+  margin-left: auto;
+  font-size: 12px;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+}
+
+/* ============ Conflict Diff Table ============ */
+.conflict-diff-section {
+  margin-bottom: 16px;
+}
+
+.conflict-diff-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 8px;
+}
+
+.conflict-diff-table {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.conflict-diff-header {
+  display: grid;
+  grid-template-columns: 140px 1fr 1fr;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.conflict-diff-header span {
+  padding: 8px 12px;
+}
+
+.conflict-diff-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 1fr;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 13px;
+  transition: background 0.15s;
+}
+
+.conflict-diff-row:last-child {
+  border-bottom: none;
+}
+
+.conflict-diff-row:hover {
+  background: #f9fafb;
+}
+
+.conflict-diff-row span {
+  padding: 8px 12px;
+  word-break: break-all;
+}
+
+.diff-col-label {
+  color: #374151;
+  font-weight: 500;
+  background: #fafafa;
+}
+
+.diff-changed .diff-col-label {
+  background: #fffbeb;
+}
+
+.diff-highlight-local {
+  background: #fef2f2 !important;
+  color: #991b1b;
+  font-weight: 500;
+  border-left: 2px solid #fca5a5;
+}
+
+.diff-highlight-server {
+  background: #eff6ff !important;
+  color: #1e40af;
+  font-weight: 500;
+  border-left: 2px solid #93c5fd;
+}
+
+.diff-unchanged {
+  opacity: 0.65;
+}
+
+.diff-unchanged .diff-col-label {
+  background: transparent;
+}
+
+.diff-unchanged .diff-col-local,
+.diff-unchanged .diff-col-server {
+  color: #9ca3af;
+}
+
+/* ============ Conflict Unchanged Section ============ */
+.conflict-unchanged-section {
+  margin-bottom: 16px;
+}
+
+.conflict-unchanged-section summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: #6b7280;
+  padding: 8px 0;
+  user-select: none;
+}
+
+.conflict-unchanged-section summary:hover {
+  color: #374151;
+}
+
 /* ============ Responsive ============ */
 @media (max-width: 640px) {
   .sync-status-bar {
@@ -3364,8 +3615,36 @@ button:disabled {
   .conflict-vs {
     padding: 8px 0;
   }
+
+  .conflict-diff-header,
+  .conflict-diff-row {
+    grid-template-columns: 100px 1fr 1fr;
+  }
+
+  .conflict-diff-row span {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+
+  .conflict-meta-row {
+    gap: 8px;
+  }
+
+  .conflict-type-label {
+    margin-left: 0;
+    width: 100%;
+    text-align: center;
+  }
   
   .sync-panel {
     width: 100%;
+  }
+
+  .record-sync-row {
+    font-size: 12px;
+  }
+
+  .reminder-header-right {
+    flex-wrap: wrap;
   }
 }

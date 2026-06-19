@@ -27,6 +27,7 @@ import {
   type SyncStats,
   type SyncConfig,
   type EntityType,
+  type FieldDiff,
   DEFAULT_SYNC_CONFIG,
   SYNC_STATUS_LABELS,
   SYNC_STATUS_COLORS,
@@ -37,9 +38,11 @@ import {
   markSynced,
   markFailed,
   markConflict,
+  markSubmitting,
   resolveConflictKeepLocal,
   resolveConflictKeepServer,
   calculateSyncStats,
+  computeFieldDiffs,
   formatSyncTime,
 } from "./sync";
 
@@ -2372,9 +2375,11 @@ function PatientCard({
   canDelete: boolean;
 }) {
   const syncStatus = ((patient as any).syncStatus || "synced") as SyncStatus;
+  const isSubmitting = (patient as any).isSubmitting;
+  const submitCount = (patient as any).submitCount || 0;
   const syncColor = SYNC_STATUS_COLORS[syncStatus];
-  const syncLabel = SYNC_STATUS_LABELS[syncStatus];
-  const syncIcon = SYNC_STATUS_ICONS[syncStatus];
+  const syncLabel = isSubmitting ? "同步中..." : SYNC_STATUS_LABELS[syncStatus];
+  const syncIcon = isSubmitting ? "⟳" : SYNC_STATUS_ICONS[syncStatus];
 
   return (
     <article className={`patient-card patient-card-sync-${syncStatus} ${isSelected ? "patient-card-selected" : ""}`} onClick={onSelect}>
@@ -2388,9 +2393,10 @@ function PatientCard({
             <span 
               className="tag tag-sync-status"
               style={{ backgroundColor: syncColor + "15", color: syncColor, borderColor: syncColor + "40" }}
-              title={`${syncLabel}${(patient as any).lastSyncedAt ? ` · 上次同步：${formatSyncTime((patient as any).lastSyncedAt)}` : ""}`}
+              title={`${syncLabel}${(patient as any).lastSyncedAt ? ` · 上次同步：${formatSyncTime((patient as any).lastSyncedAt)}` : ""}${submitCount > 0 ? ` · 已提交 ${submitCount} 次` : ""}`}
             >
               {syncIcon} {syncLabel}
+              {submitCount > 1 && <span className="submit-count-inline"> ×{submitCount}</span>}
             </span>
             {patient.ageGroup && <span className="tag tag-primary">{patient.ageGroup}</span>}
             {patient.lensType && <span className="tag tag-accent">{patient.lensType}</span>}
@@ -2407,7 +2413,7 @@ function PatientCard({
         )}
         {(canEdit || canDelete || onSync) && (
           <div className="patient-actions" onClick={e => e.stopPropagation()}>
-            {onSync && syncStatus !== "synced" && (
+            {onSync && syncStatus !== "synced" && !isSubmitting && (
               <button 
                 className="text-btn sync-btn" 
                 onClick={onSync}
@@ -2416,7 +2422,12 @@ function PatientCard({
                 {syncStatus === "conflict" ? "处理冲突" : syncStatus === "failed" ? "重试" : "同步"}
               </button>
             )}
-            {onGenerateConflict && syncStatus === "synced" && (
+            {isSubmitting && (
+              <span className="text-btn submitting-indicator" style={{ color: syncColor }}>
+                ⟳ 同步中...
+              </span>
+            )}
+            {onGenerateConflict && syncStatus === "synced" && !isSubmitting && (
               <button 
                 className="text-btn" 
                 onClick={onGenerateConflict}
@@ -2440,7 +2451,9 @@ function ReminderCard({
   isCustom,
   onCycleChange,
   onCycleReset,
-  canEditCycle
+  canEditCycle,
+  onSync,
+  onGenerateConflict
 }: {
   reminder: PatientReminder;
   index: number;
@@ -2448,7 +2461,16 @@ function ReminderCard({
   onCycleChange: (days: number) => void;
   onCycleReset: () => void;
   canEditCycle: boolean;
+  onSync?: () => void;
+  onGenerateConflict?: () => void;
 }) {
+  const syncStatus = ((reminder as any).syncStatus || "synced") as SyncStatus;
+  const isSubmitting = (reminder as any).isSubmitting;
+  const submitCount = (reminder as any).submitCount || 0;
+  const syncColor = SYNC_STATUS_COLORS[syncStatus];
+  const syncIcon = isSubmitting ? "⟳" : SYNC_STATUS_ICONS[syncStatus];
+  const syncLabel = isSubmitting ? "同步中..." : SYNC_STATUS_LABELS[syncStatus];
+
   const statusConfig = {
     overdue: { label: "已逾期", className: "status-danger", textClass: "text-danger", daysText: `逾期 ${Math.abs(reminder.daysUntilNext)} 天` },
     upcoming: { label: "即将到期", className: "status-watch", textClass: "text-watch", daysText: `还剩 ${reminder.daysUntilNext} 天` },
@@ -2479,12 +2501,26 @@ function ReminderCard({
   };
 
   return (
-    <article className={`reminder-card reminder-${reminder.reminderStatus}`}>
-      <div className={`reminder-index ${config.className}`}>{String(index + 1).padStart(2, "0")}</div>
+    <article className={`reminder-card reminder-${reminder.reminderStatus} reminder-sync-${syncStatus}`}>
+      <div className={`reminder-index ${config.className}`} style={syncStatus !== "synced" ? { backgroundColor: syncColor + "20", color: syncColor } : undefined}>
+        {syncStatus !== "synced" ? syncIcon : String(index + 1).padStart(2, "0")}
+      </div>
       <div className="reminder-info">
         <div className="reminder-header">
           <h3>{reminder.patientNo}</h3>
-          <span className={`reminder-status ${config.textClass}`}>{config.label}</span>
+          <div className="reminder-header-right">
+            {(syncStatus !== "synced" || isSubmitting) && (
+              <span
+                className="tag tag-sync-status"
+                style={{ backgroundColor: syncColor + "15", color: syncColor, borderColor: syncColor + "40" }}
+                title={`${syncLabel}${(reminder as any).lastSyncedAt ? ` · 上次同步：${formatSyncTime((reminder as any).lastSyncedAt)}` : ""}${submitCount > 0 ? ` · 已提交 ${submitCount} 次` : ""}`}
+              >
+                {syncIcon} {syncLabel}
+                {submitCount > 1 && <span className="submit-count-inline"> ×{submitCount}</span>}
+              </span>
+            )}
+            <span className={`reminder-status ${config.textClass}`}>{config.label}</span>
+          </div>
         </div>
         <div className="reminder-tags">
           {reminder.ageGroup && <span className="tag tag-primary">{reminder.ageGroup}</span>}
@@ -2529,6 +2565,30 @@ function ReminderCard({
           <p className={`reminder-due ${config.textClass}`}>下次复查：{reminder.nextCheckDate} · {config.daysText}</p>
         </div>
         {reminder.remark && <p className="patient-remark">{reminder.remark}</p>}
+        {(reminder as any).syncError && (
+          <p className="patient-sync-error" title={(reminder as any).syncError}>
+            ⚠️ 同步失败：{(reminder as any).syncError}
+          </p>
+        )}
+        {(onSync && syncStatus !== "synced" && !isSubmitting) || (onGenerateConflict && syncStatus === "synced" && !isSubmitting) || isSubmitting ? (
+          <div className="reminder-sync-actions" onClick={e => e.stopPropagation()}>
+            {isSubmitting && (
+              <span className="text-btn submitting-indicator" style={{ color: syncColor }}>
+                ⟳ 同步中...
+              </span>
+            )}
+            {onSync && syncStatus !== "synced" && !isSubmitting && (
+              <button className="text-btn sync-btn" onClick={onSync} style={{ color: syncColor }}>
+                {syncStatus === "conflict" ? "处理冲突" : syncStatus === "failed" ? "重试同步" : "立即同步"}
+              </button>
+            )}
+            {onGenerateConflict && syncStatus === "synced" && !isSubmitting && (
+              <button className="text-btn" onClick={onGenerateConflict} title="模拟生成冲突（测试用）">
+                模拟冲突
+              </button>
+            )}
+          </div>
+        ) : null}
       </div>
     </article>
   );
@@ -3444,6 +3504,52 @@ function generateRecordsExportCSV(records: RefractionRecord[], patients: Patient
   return [header, ...rows].join("\n");
 }
 
+function RecordSyncIndicator({
+  record,
+  onSync,
+  onGenerateConflict
+}: {
+  record: SyncableRecord;
+  onSync?: () => void;
+  onGenerateConflict?: () => void;
+}) {
+  const syncStatus = ((record as any).syncStatus || "synced") as SyncStatus;
+  const isSubmitting = (record as any).isSubmitting;
+  const submitCount = (record as any).submitCount || 0;
+  if (syncStatus === "synced" && !onGenerateConflict && !isSubmitting) return null;
+
+  const syncColor = SYNC_STATUS_COLORS[syncStatus];
+  const syncIcon = isSubmitting ? "⟳" : SYNC_STATUS_ICONS[syncStatus];
+  const syncLabel = isSubmitting ? "同步中..." : SYNC_STATUS_LABELS[syncStatus];
+
+  return (
+    <div className={`record-sync-row ${isSubmitting ? "submitting" : ""}`} onClick={e => e.stopPropagation()}>
+      <span
+        className="tag tag-sync-status"
+        style={{ backgroundColor: syncColor + "15", color: syncColor, borderColor: syncColor + "40" }}
+        title={`${syncLabel}${(record as any).lastSyncedAt ? ` · 上次同步：${formatSyncTime((record as any).lastSyncedAt)}` : ""}${(record as any).syncError ? ` · 错误：${(record as any).syncError}` : ""}${submitCount > 0 ? ` · 已提交 ${submitCount} 次` : ""}`}
+      >
+        {syncIcon} {syncLabel}
+      </span>
+      {submitCount > 1 && (
+        <span className="submit-count-badge" title="重复提交次数">
+          ×{submitCount}
+        </span>
+      )}
+      {onSync && syncStatus !== "synced" && !isSubmitting && (
+        <button className="text-btn sync-btn" onClick={onSync} style={{ color: syncColor, fontSize: "12px" }}>
+          {syncStatus === "conflict" ? "处理冲突" : syncStatus === "failed" ? "重试" : "同步"}
+        </button>
+      )}
+      {onGenerateConflict && syncStatus === "synced" && !isSubmitting && (
+        <button className="text-btn" onClick={onGenerateConflict} style={{ fontSize: "12px" }} title="模拟冲突">
+          模拟冲突
+        </button>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [dbSupported, setDbSupported] = useState<boolean | null>(null);
   const [dbReady, setDbReady] = useState(false);
@@ -3768,28 +3874,46 @@ function App() {
     const setList = type === "patient" ? setPatients : setRecords;
     const entity = list.find(e => e.id === id);
     
-    if (!entity || isSyncing) return;
+    if (!entity) return;
+    if ((entity as any).isSubmitting) {
+      showSyncMessage("该记录正在同步中，请勿重复提交");
+      return;
+    }
+
+    const submittingList = [...list];
+    const idx = submittingList.findIndex(e => e.id === id);
+    if (idx !== -1) {
+      submittingList[idx] = markSubmitting(submittingList[idx]);
+      setList(submittingList as any);
+    }
 
     try {
       const result = await mockServer.pushEntity(type, entity, syncConfig);
-      const updatedList = [...list];
-      const idx = updatedList.findIndex(e => e.id === id);
+      const updatedList = type === "patient" ? [...patients] : [...records];
+      const updatedIdx = updatedList.findIndex(e => e.id === id);
       
-      if (idx !== -1) {
+      if (updatedIdx !== -1) {
         if (result.conflict && result.data) {
-          updatedList[idx] = markConflict(updatedList[idx], result.data, "update-update");
+          updatedList[updatedIdx] = markConflict(updatedList[updatedIdx], result.data, "update-update");
           showSyncMessage("检测到数据冲突，请处理后再同步");
         } else if (result.success && result.serverVersion) {
-          updatedList[idx] = markSynced(updatedList[idx], result.serverVersion);
+          updatedList[updatedIdx] = markSynced(updatedList[updatedIdx], result.serverVersion);
           showSyncMessage("同步成功");
         } else if (result.error) {
-          updatedList[idx] = markFailed(updatedList[idx], result.error);
-          showSyncMessage(`同步失败：${result.error}`);
+          const isDuplicate = (updatedList[updatedIdx] as any).submitCount > 1;
+          updatedList[updatedIdx] = markFailed(updatedList[updatedIdx], isDuplicate ? `${result.error}（已尝试 ${(updatedList[updatedIdx] as any).submitCount} 次提交）` : result.error);
+          showSyncMessage(`同步失败：${result.error}${isDuplicate ? `（第 ${(updatedList[updatedIdx] as any).submitCount} 次提交）` : ""}`);
         }
         setList(updatedList as any);
       }
     } catch (err) {
       console.error("单条同步失败:", err);
+      const failedList = type === "patient" ? [...patients] : [...records];
+      const failedIdx = failedList.findIndex(e => e.id === id);
+      if (failedIdx !== -1) {
+        failedList[failedIdx] = markFailed(failedList[failedIdx], "未知错误");
+        setList(failedList as any);
+      }
     }
   }, [patients, records, syncConfig, isSyncing, showSyncMessage]);
 
@@ -4202,6 +4326,17 @@ function App() {
                     onCycleChange={(days) => handleSetCustomCycle(reminder.patientNo, days)}
                     onCycleReset={() => handleSetCustomCycle(reminder.patientNo, null)}
                     canEditCycle={permission.canEditReminderCycle}
+                    onSync={() => {
+                      const p = patients.find(pp => pp.id === reminder.id);
+                      if (p) {
+                        if ((p as any).syncStatus === "conflict") {
+                          openConflictModal("patient", p);
+                        } else {
+                          handleSyncEntity("patient", reminder.id);
+                        }
+                      }
+                    }}
+                    onGenerateConflict={() => handleGenerateConflict("patient", reminder.id)}
                   />
                 ))
               ) : (
@@ -4237,6 +4372,17 @@ function App() {
                     onCycleChange={(days) => handleSetCustomCycle(reminder.patientNo, days)}
                     onCycleReset={() => handleSetCustomCycle(reminder.patientNo, null)}
                     canEditCycle={permission.canEditReminderCycle}
+                    onSync={() => {
+                      const p = patients.find(pp => pp.id === reminder.id);
+                      if (p) {
+                        if ((p as any).syncStatus === "conflict") {
+                          openConflictModal("patient", p);
+                        } else {
+                          handleSyncEntity("patient", reminder.id);
+                        }
+                      }
+                    }}
+                    onGenerateConflict={() => handleGenerateConflict("patient", reminder.id)}
                   />
                 ))
               ) : (
@@ -4272,6 +4418,17 @@ function App() {
                     onCycleChange={(days) => handleSetCustomCycle(reminder.patientNo, days)}
                     onCycleReset={() => handleSetCustomCycle(reminder.patientNo, null)}
                     canEditCycle={permission.canEditReminderCycle}
+                    onSync={() => {
+                      const p = patients.find(pp => pp.id === reminder.id);
+                      if (p) {
+                        if ((p as any).syncStatus === "conflict") {
+                          openConflictModal("patient", p);
+                        } else {
+                          handleSyncEntity("patient", reminder.id);
+                        }
+                      }
+                    }}
+                    onGenerateConflict={() => handleGenerateConflict("patient", reminder.id)}
                   />
                 ))
               ) : (
@@ -4576,13 +4733,32 @@ function App() {
             {selectedPatientRecords.slice(0, 5).map((record, index) => (
               <article
                 key={record.id}
-                className="record-card record-clickable"
+                className={`record-card record-clickable record-sync-${((record as any).syncStatus || "synced") as SyncStatus}`}
                 onClick={() => openDrawer(record)}
               >
-                <div className="record-index">{String(index + 1).padStart(2, "0")}</div>
-                <div>
+                <div className="record-index" style={
+                  ((record as any).syncStatus || "synced") !== "synced"
+                    ? { backgroundColor: SYNC_STATUS_COLORS[((record as any).syncStatus || "synced") as SyncStatus] + "20", color: SYNC_STATUS_COLORS[((record as any).syncStatus || "synced") as SyncStatus] }
+                    : undefined
+                }>
+                  {((record as any).syncStatus || "synced") !== "synced"
+                    ? SYNC_STATUS_ICONS[((record as any).syncStatus || "synced") as SyncStatus]
+                    : String(index + 1).padStart(2, "0")}
+                </div>
+                <div style={{ flex: 1 }}>
                   <h3>{record.examDate} · <span className={`type-badge type-${record.type}`}>{record.type}</span></h3>
                   <p>{getVisibleRecordSummary(record, permission.canViewDetailedRecords)}</p>
+                  <RecordSyncIndicator
+                    record={record as SyncableRecord}
+                    onSync={() => {
+                      if ((record as any).syncStatus === "conflict") {
+                        openConflictModal("record", record);
+                      } else {
+                        handleSyncEntity("record", record.id);
+                      }
+                    }}
+                    onGenerateConflict={() => handleGenerateConflict("record", record.id)}
+                  />
                 </div>
               </article>
             ))}
@@ -4652,13 +4828,32 @@ function App() {
             {(selectedPatientNo ? selectedPatientRecords : records).map((record, index) => (
               <article
                 key={record.id}
-                className="record-card record-clickable"
+                className={`record-card record-clickable record-sync-${((record as any).syncStatus || "synced") as SyncStatus}`}
                 onClick={() => openDrawer(record)}
               >
-                <div className="record-index">{String(index + 1).padStart(2, "0")}</div>
-                <div>
+                <div className="record-index" style={
+                  ((record as any).syncStatus || "synced") !== "synced"
+                    ? { backgroundColor: SYNC_STATUS_COLORS[((record as any).syncStatus || "synced") as SyncStatus] + "20", color: SYNC_STATUS_COLORS[((record as any).syncStatus || "synced") as SyncStatus] }
+                    : undefined
+                }>
+                  {((record as any).syncStatus || "synced") !== "synced"
+                    ? SYNC_STATUS_ICONS[((record as any).syncStatus || "synced") as SyncStatus]
+                    : String(index + 1).padStart(2, "0")}
+                </div>
+                <div style={{ flex: 1 }}>
                   <h3>{record.patientNo} · {record.patientName} · {record.examDate}</h3>
                   <p>{getVisibleRecordSummary(record, permission.canViewDetailedRecords)}</p>
+                  <RecordSyncIndicator
+                    record={record as SyncableRecord}
+                    onSync={() => {
+                      if ((record as any).syncStatus === "conflict") {
+                        openConflictModal("record", record);
+                      } else {
+                        handleSyncEntity("record", record.id);
+                      }
+                    }}
+                    onGenerateConflict={() => handleGenerateConflict("record", record.id)}
+                  />
                 </div>
               </article>
             ))}
@@ -4798,15 +4993,34 @@ function App() {
 
       <div className="record-list">
         {(selectedPatientNo ? selectedPatientRecords : records).map((record, index) => (
-          <div key={record.id} className="prescription-summary-card">
+          <div key={record.id} className={`prescription-summary-card prescription-sync-${((record as any).syncStatus || "synced") as SyncStatus}`}>
             <article
-              className="record-card record-clickable"
+              className={`record-card record-clickable record-sync-${((record as any).syncStatus || "synced") as SyncStatus}`}
               onClick={() => openDrawer(record)}
             >
-              <div className="record-index">{String(index + 1).padStart(2, "0")}</div>
+              <div className="record-index" style={
+                ((record as any).syncStatus || "synced") !== "synced"
+                  ? { backgroundColor: SYNC_STATUS_COLORS[((record as any).syncStatus || "synced") as SyncStatus] + "20", color: SYNC_STATUS_COLORS[((record as any).syncStatus || "synced") as SyncStatus] }
+                  : undefined
+              }>
+                {((record as any).syncStatus || "synced") !== "synced"
+                  ? SYNC_STATUS_ICONS[((record as any).syncStatus || "synced") as SyncStatus]
+                  : String(index + 1).padStart(2, "0")}
+              </div>
               <div style={{ flex: 1 }}>
                 <h3>{record.patientNo} · {record.patientName} · {record.examDate}</h3>
                 <p>{getVisibleRecordSummary(record, permission.canViewDetailedRecords)}</p>
+                <RecordSyncIndicator
+                  record={record as SyncableRecord}
+                  onSync={() => {
+                    if ((record as any).syncStatus === "conflict") {
+                      openConflictModal("record", record);
+                    } else {
+                      handleSyncEntity("record", record.id);
+                    }
+                  }}
+                  onGenerateConflict={() => handleGenerateConflict("record", record.id)}
+                />
               </div>
             </article>
             {permission.canExport && (
@@ -4893,10 +5107,21 @@ function App() {
           </div>
           <div className="record-list export-record-list">
             {(selectedPatientNo ? selectedPatientRecords : records).slice(0, 3).map((record, index) => (
-              <div key={record.id} className="export-record-item">
-                <div>
+              <div key={record.id} className={`export-record-item export-sync-${((record as any).syncStatus || "synced") as SyncStatus}`}>
+                <div style={{ flex: 1 }}>
                   <strong>{record.patientNo} · {record.patientName}</strong>
                   <p>{record.examDate} · {record.type}</p>
+                  <RecordSyncIndicator
+                    record={record as SyncableRecord}
+                    onSync={() => {
+                      if ((record as any).syncStatus === "conflict") {
+                        openConflictModal("record", record);
+                      } else {
+                        handleSyncEntity("record", record.id);
+                      }
+                    }}
+                    onGenerateConflict={() => handleGenerateConflict("record", record.id)}
+                  />
                 </div>
                 <button
                   className="primary-action"
@@ -5323,108 +5548,117 @@ function App() {
         </div>
       )}
 
-      {showConflictModal && conflictEntity && (
-        <div className="modal-overlay" onClick={() => setShowConflictModal(false)}>
-          <div className="modal-dialog modal-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>处理数据冲突</h3>
-              <button className="modal-close" onClick={() => setShowConflictModal(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <div className="conflict-warning">
-                <div className="conflict-warning-icon">⚠️</div>
-                <div className="conflict-warning-text">
-                  <strong>检测到数据冲突</strong>
-                  <p>该记录的本地版本与服务端版本不一致，请选择保留哪个版本。</p>
-                </div>
+      {showConflictModal && conflictEntity && (() => {
+        const fieldDiffs = computeFieldDiffs(
+          conflictEntity.type,
+          conflictEntity.entity,
+          conflictEntity.entity.conflictData?.serverData
+        );
+        const changedFields = fieldDiffs.filter(d => d.isDifferent);
+        const unchangedFields = fieldDiffs.filter(d => !d.isDifferent);
+
+        return (
+          <div className="modal-overlay" onClick={() => setShowConflictModal(false)}>
+            <div className="modal-dialog modal-lg" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3>处理数据冲突</h3>
+                <button className="modal-close" onClick={() => setShowConflictModal(false)}>✕</button>
               </div>
-              
-              <div className="conflict-compare">
-                <div className="conflict-version local">
-                  <div className="conflict-version-header">
-                    <span className="conflict-version-badge local-badge">本地版本</span>
-                    <span className="conflict-version-time">本地版本 v{conflictEntity.entity.localVersion}</span>
-                  </div>
-                  <div className="conflict-version-content">
-                    {conflictEntity.type === "patient" && (
-                      <>
-                        <p><strong>患者编号：</strong>{conflictEntity.entity.patientNo}</p>
-                        <p><strong>年龄段：</strong>{conflictEntity.entity.ageGroup}</p>
-                        <p><strong>镜片类型：</strong>{conflictEntity.entity.lensType || "未设置"}</p>
-                        <p><strong>上次检查：</strong>{conflictEntity.entity.lastCheckDate}</p>
-                        <p><strong>备注：</strong>{conflictEntity.entity.remark || "无"}</p>
-                      </>
-                    )}
-                    {conflictEntity.type === "record" && (
-                      <>
-                        <p><strong>患者：</strong>{conflictEntity.entity.patientNo}</p>
-                        <p><strong>检查日期：</strong>{conflictEntity.entity.examDate}</p>
-                        <p><strong>类型：</strong>{conflictEntity.entity.type}</p>
-                        <p><strong>摘要：</strong>{conflictEntity.entity.summary}</p>
-                      </>
-                    )}
+              <div className="modal-body">
+                <div className="conflict-warning">
+                  <div className="conflict-warning-icon">⚠️</div>
+                  <div className="conflict-warning-text">
+                    <strong>检测到数据冲突</strong>
+                    <p>该记录的本地版本与服务端版本不一致，请选择保留哪个版本。</p>
                   </div>
                 </div>
 
-                <div className="conflict-vs">VS</div>
+                <div className="conflict-meta-row">
+                  <span className="conflict-meta-item">
+                    <span className="conflict-version-badge local-badge">本地</span>
+                    v{conflictEntity.entity.localVersion}
+                  </span>
+                  <span className="conflict-meta-sep">→</span>
+                  <span className="conflict-meta-item">
+                    <span className="conflict-version-badge server-badge">服务端</span>
+                    v{conflictEntity.entity.conflictData?.serverData?.serverVersion || "?"}
+                  </span>
+                  <span className="conflict-meta-item conflict-type-label">
+                    冲突类型：{conflictEntity.entity.conflictData?.conflictType === "update-update" ? "双方更新" : conflictEntity.entity.conflictData?.conflictType === "update-delete" ? "本地更新/服务端删除" : "本地删除/服务端更新"}
+                  </span>
+                </div>
 
-                <div className="conflict-version server">
-                  <div className="conflict-version-header">
-                    <span className="conflict-version-badge server-badge">服务端版本</span>
-                    <span className="conflict-version-time">服务端版本 v{conflictEntity.entity.conflictData?.serverData?.serverVersion || "?"}</span>
+                {changedFields.length > 0 && (
+                  <div className="conflict-diff-section">
+                    <h4 className="conflict-diff-title">变更字段（{changedFields.length} 处差异）</h4>
+                    <div className="conflict-diff-table">
+                      <div className="conflict-diff-header">
+                        <span className="diff-col-label">字段</span>
+                        <span className="diff-col-local">本地值</span>
+                        <span className="diff-col-server">服务端值</span>
+                      </div>
+                      {changedFields.map(diff => (
+                        <div key={diff.field} className="conflict-diff-row diff-changed">
+                          <span className="diff-col-label">{diff.label}</span>
+                          <span className="diff-col-local diff-highlight-local">{String(diff.localValue)}</span>
+                          <span className="diff-col-server diff-highlight-server">{String(diff.serverValue)}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="conflict-version-content">
-                    {conflictEntity.type === "patient" && conflictEntity.entity.conflictData?.serverData && (
-                      <>
-                        <p><strong>患者编号：</strong>{conflictEntity.entity.conflictData.serverData.patientNo}</p>
-                        <p><strong>年龄段：</strong>{conflictEntity.entity.conflictData.serverData.ageGroup}</p>
-                        <p><strong>镜片类型：</strong>{conflictEntity.entity.conflictData.serverData.lensType || "未设置"}</p>
-                        <p><strong>上次检查：</strong>{conflictEntity.entity.conflictData.serverData.lastCheckDate}</p>
-                        <p><strong>备注：</strong>{conflictEntity.entity.conflictData.serverData.remark || "无"}</p>
-                      </>
-                    )}
-                    {conflictEntity.type === "record" && conflictEntity.entity.conflictData?.serverData && (
-                      <>
-                        <p><strong>患者：</strong>{conflictEntity.entity.conflictData.serverData.patientNo}</p>
-                        <p><strong>检查日期：</strong>{conflictEntity.entity.conflictData.serverData.examDate}</p>
-                        <p><strong>类型：</strong>{conflictEntity.entity.conflictData.serverData.type}</p>
-                        <p><strong>摘要：</strong>{conflictEntity.entity.conflictData.serverData.summary}</p>
-                      </>
-                    )}
-                  </div>
+                )}
+
+                {unchangedFields.length > 0 && (
+                  <details className="conflict-unchanged-section">
+                    <summary>未变更字段（{unchangedFields.length} 处一致）</summary>
+                    <div className="conflict-diff-table">
+                      <div className="conflict-diff-header">
+                        <span className="diff-col-label">字段</span>
+                        <span className="diff-col-local">本地值</span>
+                        <span className="diff-col-server">服务端值</span>
+                      </div>
+                      {unchangedFields.map(diff => (
+                        <div key={diff.field} className="conflict-diff-row diff-unchanged">
+                          <span className="diff-col-label">{diff.label}</span>
+                          <span className="diff-col-local">{String(diff.localValue)}</span>
+                          <span className="diff-col-server">{String(diff.serverValue)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+
+                <div className="conflict-diff-hint">
+                  <p><strong>差异说明：</strong></p>
+                  <ul>
+                    <li>红色高亮为本地修改的字段值</li>
+                    <li>蓝色高亮为服务端更新的字段值</li>
+                    <li>选择"保留本地版本"后，本地值将重新排队等待同步到服务端</li>
+                    <li>选择"采用服务端版本"后，本地修改将被服务端值覆盖</li>
+                  </ul>
                 </div>
               </div>
-
-              <div className="conflict-diff-hint">
-                <p><strong>差异说明：</strong></p>
-                <ul>
-                  <li>本地版本包含您最近在本设备上的修改</li>
-                  <li>服务端版本包含其他设备或更早同步的更新</li>
-                  <li>选择保留本地版本后，数据将重新排队等待同步</li>
-                  <li>选择采用服务端版本后，本地修改将被覆盖</li>
-                </ul>
+              <div className="modal-actions">
+                <button className="ghost-btn" onClick={() => setShowConflictModal(false)}>
+                  稍后处理
+                </button>
+                <button 
+                  className="secondary-btn"
+                  onClick={() => handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, false)}
+                >
+                  采用服务端版本
+                </button>
+                <button 
+                  className="primary-action"
+                  onClick={() => handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, true)}
+                >
+                  保留本地版本
+                </button>
               </div>
-            </div>
-            <div className="modal-actions">
-              <button className="ghost-btn" onClick={() => setShowConflictModal(false)}>
-                稍后处理
-              </button>
-              <button 
-                className="secondary-btn"
-                onClick={() => handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, false)}
-              >
-                采用服务端版本
-              </button>
-              <button 
-                className="primary-action"
-                onClick={() => handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, true)}
-              >
-                保留本地版本
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </main>
   );
 }
