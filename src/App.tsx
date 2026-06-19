@@ -569,6 +569,253 @@ interface PrescriptionComparisonResult {
   daysBetween: number;
 }
 
+interface ParsedRecordRow {
+  record: Omit<RefractionRecord, "id" | "summary"> & { summary: string };
+  rightEyeSummary: string;
+  rowIndex: number;
+}
+
+interface ParseErrorRow {
+  rowIndex: number;
+  rowText: string;
+  errors: string[];
+}
+
+interface CsvParseResult {
+  validRows: ParsedRecordRow[];
+  errorRows: ParseErrorRow[];
+}
+
+const CSV_FIXED_COLUMNS = [
+  "患者编号",
+  "患者姓名",
+  "分类",
+  "类型",
+  "年龄段",
+  "检查日期",
+  "右眼球镜",
+  "右眼柱镜",
+  "右眼轴位",
+  "左眼球镜",
+  "左眼柱镜",
+  "左眼轴位",
+  "瞳距",
+  "建议"
+];
+
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function formatRightEyeSummary(sphere: string, cylinder: string, axis: string): string {
+  const sphNum = parseSafeNumber(sphere);
+  const cylNum = parseSafeNumber(cylinder);
+  const hasCylinder = cylNum !== null && cylNum !== 0;
+  const sphText = sphNum !== null ? `${sphNum > 0 ? "+" : ""}${sphNum.toFixed(2)}DS` : sphere;
+  if (hasCylinder) {
+    const cylText = cylNum !== null ? `${cylNum > 0 ? "+" : ""}${cylNum.toFixed(2)}DC` : cylinder;
+    const axText = axis ? `${parseInt(axis, 10) || axis}°` : "";
+    return `${sphText}/${cylText}×${axText}`;
+  }
+  return sphText;
+}
+
+function validateAndBuildRecord(fields: string[], rowIndex: number): { record?: ParsedRecordRow; errors?: string[] } {
+  const errors: string[] = [];
+
+  if (fields.length < CSV_FIXED_COLUMNS.length) {
+    errors.push(`字段数量不足：期望 ${CSV_FIXED_COLUMNS.length} 列，实际 ${fields.length} 列`);
+  }
+
+  const [
+    patientNo,
+    patientName,
+    category,
+    type,
+    ageGroup,
+    examDate,
+    rightSphere,
+    rightCylinder,
+    rightAxis,
+    leftSphere,
+    leftCylinder,
+    leftAxis,
+    pd,
+    recommendation
+  ] = fields;
+
+  if (!patientNo?.trim()) errors.push("患者编号不能为空");
+  if (!patientName?.trim()) errors.push("患者姓名不能为空");
+
+  if (ageGroup && !ageGroups.includes(ageGroup.trim())) {
+    errors.push(`年龄段无效：${ageGroup}（有效值：${ageGroups.join("、")}）`);
+  }
+
+  if (examDate && !/^\d{4}-\d{2}-\d{2}$/.test(examDate.trim())) {
+    errors.push(`检查日期格式无效：${examDate}（请使用 YYYY-MM-DD 格式）`);
+  }
+
+  if (rightSphere && validateSphere(rightSphere.trim())) {
+    errors.push(`右眼球镜：${validateSphere(rightSphere.trim())?.message}`);
+  }
+  if (leftSphere && validateSphere(leftSphere.trim())) {
+    errors.push(`左眼球镜：${validateSphere(leftSphere.trim())?.message}`);
+  }
+
+  const hasRightCyl = rightCylinder && parseSafeNumber(rightCylinder.trim()) !== null && parseSafeNumber(rightCylinder.trim()) !== 0;
+  const hasLeftCyl = leftCylinder && parseSafeNumber(leftCylinder.trim()) !== null && parseSafeNumber(leftCylinder.trim()) !== 0;
+
+  if (rightCylinder && validateCylinder(rightCylinder.trim())) {
+    errors.push(`右眼柱镜：${validateCylinder(rightCylinder.trim())?.message}`);
+  }
+  if (leftCylinder && validateCylinder(leftCylinder.trim())) {
+    errors.push(`左眼柱镜：${validateCylinder(leftCylinder.trim())?.message}`);
+  }
+
+  if (hasRightCyl && (!rightAxis || !rightAxis.trim())) {
+    errors.push("右眼有柱镜时轴位必填");
+  }
+  if (hasLeftCyl && (!leftAxis || !leftAxis.trim())) {
+    errors.push("左眼有柱镜时轴位必填");
+  }
+
+  if (rightAxis && validateAxis(rightAxis.trim(), hasRightCyl)) {
+    errors.push(`右眼轴位：${validateAxis(rightAxis.trim(), hasRightCyl)?.message}`);
+  }
+  if (leftAxis && validateAxis(leftAxis.trim(), hasLeftCyl)) {
+    errors.push(`左眼轴位：${validateAxis(leftAxis.trim(), hasLeftCyl)?.message}`);
+  }
+
+  if (pd && validatePd(pd.trim())) {
+    errors.push(`瞳距：${validatePd(pd.trim())?.message}`);
+  }
+
+  if (errors.length > 0) {
+    return { errors };
+  }
+
+  const emptyEye: EyeRefraction = {
+    nakedVision: "",
+    correctedVision: "",
+    sphere: "",
+    cylinder: "",
+    axis: "",
+    add: ""
+  };
+
+  const rightEye: EyeRefraction = {
+    ...emptyEye,
+    sphere: rightSphere?.trim() || "",
+    cylinder: rightCylinder?.trim() || "",
+    axis: rightAxis?.trim() || ""
+  };
+
+  const leftEye: EyeRefraction = {
+    ...emptyEye,
+    sphere: leftSphere?.trim() || "",
+    cylinder: leftCylinder?.trim() || "",
+    axis: leftAxis?.trim() || ""
+  };
+
+  const rightEyeSummary = formatRightEyeSummary(
+    rightSphere?.trim() || "",
+    rightCylinder?.trim() || "",
+    rightAxis?.trim() || ""
+  );
+
+  const summaryParts: string[] = [];
+  summaryParts.push(`右眼${formatRightEyeSummary(rightSphere?.trim() || "", rightCylinder?.trim() || "", rightAxis?.trim() || "")}`);
+  summaryParts.push(`左眼${formatRightEyeSummary(leftSphere?.trim() || "", leftCylinder?.trim() || "", leftAxis?.trim() || "")}`);
+  if (pd?.trim()) {
+    summaryParts.push(`PD ${parseInt(pd.trim(), 10) || pd.trim()}mm`);
+  }
+  const summary = summaryParts.join("，");
+
+  const record: ParsedRecordRow = {
+    rowIndex,
+    rightEyeSummary,
+    record: {
+      patientNo: patientNo?.trim() || "",
+      patientName: patientName?.trim() || "",
+      category: category?.trim() || (ageGroup?.trim() ? `${ageGroup.trim()}` : ""),
+      type: type?.trim() || "初配",
+      ageGroup: ageGroup?.trim() || "",
+      gender: "",
+      examDate: examDate?.trim() || formatLocalDate(new Date()),
+      rightEye,
+      leftEye,
+      pd: pd?.trim() || "",
+      cornealCurvature: {
+        right: { horizontal: "", vertical: "" },
+        left: { horizontal: "", vertical: "" }
+      },
+      recommendation: recommendation?.trim() || "",
+      summary
+    }
+  };
+
+  return { record };
+}
+
+function parseCsvText(csvText: string): CsvParseResult {
+  const lines = csvText.trim().split(/\r?\n/).filter(line => line.trim().length > 0);
+  const validRows: ParsedRecordRow[] = [];
+  const errorRows: ParseErrorRow[] = [];
+
+  if (lines.length === 0) {
+    return { validRows: [], errorRows: [] };
+  }
+
+  let startIndex = 0;
+  const firstLineFields = parseCsvLine(lines[0]);
+  const looksLikeHeader = firstLineFields.some(f => 
+    ["患者编号", "patientNo", "编号", "姓名"].includes(f.trim())
+  );
+  if (looksLikeHeader) {
+    startIndex = 1;
+  }
+
+  for (let i = startIndex; i < lines.length; i++) {
+    const line = lines[i];
+    const rowIndex = i - startIndex + 1;
+    const fields = parseCsvLine(line);
+    const result = validateAndBuildRecord(fields, rowIndex);
+
+    if (result.errors && result.errors.length > 0) {
+      errorRows.push({
+        rowIndex,
+        rowText: line,
+        errors: result.errors
+      });
+    } else if (result.record) {
+      validRows.push(result.record);
+    }
+  }
+
+  return { validRows, errorRows };
+}
+
 const SPHERE_CHANGE_THRESHOLD = 0.25;
 const CYLINDER_CHANGE_THRESHOLD = 0.25;
 const AXIS_CHANGE_THRESHOLD = 10;
@@ -1393,6 +1640,171 @@ function PrescriptionForm({
   );
 }
 
+function ImportPreview({
+  onConfirm,
+  onCancel
+}: {
+  onConfirm: (records: Array<Omit<RefractionRecord, "id" | "summary"> & { summary: string }>) => void;
+  onCancel: () => void;
+}) {
+  const [csvText, setCsvText] = useState("");
+  const [parseResult, setParseResult] = useState<CsvParseResult | null>(null);
+  const [hasParsed, setHasParsed] = useState(false);
+
+  const handleParse = () => {
+    const result = parseCsvText(csvText);
+    setParseResult(result);
+    setHasParsed(true);
+  };
+
+  const handleClear = () => {
+    setCsvText("");
+    setParseResult(null);
+    setHasParsed(false);
+  };
+
+  const handleConfirm = () => {
+    if (!parseResult || parseResult.validRows.length === 0) return;
+    const records = parseResult.validRows.map(row => row.record);
+    onConfirm(records);
+    setCsvText("");
+    setParseResult(null);
+    setHasParsed(false);
+  };
+
+  const sampleCsv = [
+    CSV_FIXED_COLUMNS.join(","),
+    "Patient-201,王小明,儿童近视,复查,儿童,2026-06-10,-2.50,-0.50,180,-2.25,-0.50,175,58,视力稳定，继续保持",
+    "Patient-202,李小红,成人近视,初配,成人,2026-06-12,-3.00,-0.75,90,-2.75,-0.50,85,62,初次配镜",
+    "Patient-203,张大爷,渐进片,初配,中老年,2026-06-08,+0.50,-0.75,90,+0.75,-1.00,85,63,ADD +1.50"
+  ].join("\n");
+
+  return (
+    <div className="import-preview">
+      <div className="import-section">
+        <div className="form-section-title">粘贴CSV数据</div>
+        <p className="import-hint">
+          固定字段顺序：{CSV_FIXED_COLUMNS.join(" → ")}
+        </p>
+        <textarea
+          className="import-textarea"
+          placeholder={`请粘贴CSV格式的验光记录，每行一条记录。\n示例格式：\n${sampleCsv}`}
+          value={csvText}
+          onChange={e => setCsvText(e.target.value)}
+          rows={8}
+        />
+        <div className="import-actions">
+          <button type="button" className="ghost-btn" onClick={onCancel}>取消</button>
+          <button type="button" className="ghost-btn" onClick={handleClear}>清空</button>
+          <button
+            type="button"
+            className="primary-action"
+            onClick={handleParse}
+            disabled={!csvText.trim()}
+          >
+            解析预览
+          </button>
+        </div>
+      </div>
+
+      {hasParsed && parseResult && (
+        <div className="parse-results">
+          {parseResult.validRows.length > 0 && (
+            <div className="parse-success-section">
+              <div className="parse-result-header success">
+                <span>✓ 可导入记录</span>
+                <span className="parse-count">{parseResult.validRows.length} 条</span>
+              </div>
+              <div className="parse-table-wrapper">
+                <table className="parse-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: "50px" }}>序号</th>
+                      <th>患者编号</th>
+                      <th>分类</th>
+                      <th>类型</th>
+                      <th>右眼处方摘要</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parseResult.validRows.map((row) => (
+                      <tr key={row.rowIndex}>
+                        <td className="row-index">{row.rowIndex}</td>
+                        <td className="mono">{row.record.patientNo}</td>
+                        <td>{row.record.category || "—"}</td>
+                        <td>
+                          <span className={`type-badge type-${row.record.type}`}>
+                            {row.record.type}
+                          </span>
+                        </td>
+                        <td className="mono">{row.rightEyeSummary}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {parseResult.errorRows.length > 0 && (
+            <div className="parse-error-section">
+              <div className="parse-result-header error">
+                <span>✕ 错误行（将被跳过）</span>
+                <span className="parse-count">{parseResult.errorRows.length} 条</span>
+              </div>
+              <div className="parse-table-wrapper error-table">
+                <table className="parse-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: "50px" }}>行号</th>
+                      <th>原始内容</th>
+                      <th>错误信息</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parseResult.errorRows.map((row) => (
+                      <tr key={row.rowIndex} className="error-row">
+                        <td className="row-index">{row.rowIndex}</td>
+                        <td className="raw-text">{row.rowText}</td>
+                        <td className="error-cell">
+                          <ul>
+                            {row.errors.map((err, i) => (
+                              <li key={i}>{err}</li>
+                            ))}
+                          </ul>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {parseResult.validRows.length === 0 && parseResult.errorRows.length === 0 && (
+            <div className="empty-parse">
+              <p>未解析到任何有效数据</p>
+            </div>
+          )}
+
+          {parseResult.validRows.length > 0 && (
+            <div className="import-confirm-actions">
+              <button type="button" className="ghost-btn" onClick={onCancel}>取消</button>
+              <button
+                type="button"
+                className="primary-action"
+                onClick={handleConfirm}
+              >
+                确认导入 {parseResult.validRows.length} 条记录
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PatientCard({
   patient,
   index,
@@ -1972,6 +2384,7 @@ function App() {
   const [selectedRecord, setSelectedRecord] = useState<RefractionRecord | null>(null);
   const [records, setRecords] = useState<RefractionRecord[]>(refractionRecords);
   const [showPrescriptionForm, setShowPrescriptionForm] = useState(false);
+  const [showImportForm, setShowImportForm] = useState(false);
   const [comparisonDrawerOpen, setComparisonDrawerOpen] = useState(false);
   const [selectedComparison, setSelectedComparison] = useState<PrescriptionComparisonResult | null>(null);
   const [comparisonFilter, setComparisonFilter] = useState<ComparisonCategory | "all">("all");
@@ -2100,6 +2513,24 @@ function App() {
     };
     setRecords(prev => [newRecord, ...prev]);
     setShowPrescriptionForm(false);
+  };
+
+  const openImportForm = () => {
+    setShowImportForm(true);
+    setShowPrescriptionForm(false);
+  };
+
+  const cancelImportForm = () => {
+    setShowImportForm(false);
+  };
+
+  const handleImportSubmit = (recordsData: Array<Omit<RefractionRecord, "id" | "summary"> & { summary: string }>) => {
+    const newRecords: RefractionRecord[] = recordsData.map((data, index) => ({
+      id: `r-import-${Date.now()}-${index}`,
+      ...data
+    }));
+    setRecords(prev => [...newRecords, ...prev]);
+    setShowImportForm(false);
   };
 
   const editingPatient = patients.find(p => p.id === editingId);
@@ -2285,8 +2716,11 @@ function App() {
               <h2>近期记录</h2>
             </div>
             <div className="record-actions">
-              {!showPrescriptionForm && (
+              {!showPrescriptionForm && !showImportForm && (
                 <button className="primary-action" onClick={openPrescriptionForm}>+ 新增处方录入</button>
+              )}
+              {!showPrescriptionForm && !showImportForm && (
+                <button onClick={openImportForm}>批量导入</button>
               )}
               <button>导出摘要</button>
             </div>
@@ -2296,6 +2730,13 @@ function App() {
             <PrescriptionForm
               onSubmit={handlePrescriptionSubmit}
               onCancel={cancelPrescriptionForm}
+            />
+          )}
+
+          {showImportForm && (
+            <ImportPreview
+              onConfirm={handleImportSubmit}
+              onCancel={cancelImportForm}
             />
           )}
 
