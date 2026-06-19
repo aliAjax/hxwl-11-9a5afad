@@ -2270,6 +2270,7 @@ function generateLensRecommendation(input: LensRecommendationInput): LensRecomme
         detailedAdvice.push("角膜塑形镜主要用于近视控制和矫正，对远视无效");
         detailedAdvice.push("建议咨询眼科医生，选择合适的远视矫正方案");
         detailedAdvice.push("如为儿童远视，需关注弱视和斜视风险");
+        reviewCycle = "按医生评估周期复查";
       } else {
         primaryAdvice = isReview
           ? "角膜塑形镜复查：评估塑形效果，监测角膜健康"
