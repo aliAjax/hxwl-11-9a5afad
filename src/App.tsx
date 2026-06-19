@@ -66,7 +66,7 @@ export const ROLE_CONFIGS: Record<UserRole, RoleConfig> = {
   "advisor": {
     label: "门店顾问",
     defaultStep: "patient-profile",
-    primaryEntryPoints: ["patient-profile", "export"],
+    primaryEntryPoints: ["patient-profile"],
     description: "负责患者接待、建档管理与配镜建议",
     dashboardSections: ["metrics", "reminder", "lens-recommendation"]
   },
@@ -118,13 +118,13 @@ export const ROLE_PERMISSIONS: Record<UserRole, RolePermission> = {
   "advisor": {
     canViewPatientProfile: true,
     canEditPatientProfile: true,
-    canViewInitialExam: true,
+    canViewInitialExam: false,
     canEditInitialExam: false,
-    canViewRecheckCompare: true,
+    canViewRecheckCompare: false,
     canEditRecheckCompare: false,
-    canViewPrescriptionSummary: true,
+    canViewPrescriptionSummary: false,
     canEditPrescriptionSummary: false,
-    canExport: true,
+    canExport: false,
     canGenerateLensRecommendation: true,
     canViewReminderBoard: true,
     canEditReminderCycle: true,
@@ -1212,6 +1212,13 @@ function getAllComparisons(records: RefractionRecord[]): PrescriptionComparisonR
   return results.sort((a, b) =>
     parseLocalDate(b.currRecord.examDate).getTime() - parseLocalDate(a.currRecord.examDate).getTime()
   );
+}
+
+function getVisibleRecordSummary(record: RefractionRecord, canViewDetailedRecords: boolean): string {
+  if (canViewDetailedRecords) {
+    return [record.category, record.type, record.summary].filter(Boolean).join(" · ");
+  }
+  return [record.category, record.type, `检查日期 ${record.examDate}`].filter(Boolean).join(" · ");
 }
 
 type LensCategory = "children-myopia" | "progressive" | "ortho-k" | "adult-regular";
@@ -2533,79 +2540,92 @@ function RefractionDrawer({
               </div>
             </section>
 
-            <section className="drawer-section">
-              <h3>屈光参数</h3>
-              <div className="drawer-eye-tables">
-                <div className="drawer-eye-block">
-                  <p className="drawer-eye-title">右眼 (OD)</p>
-                  <div className="drawer-param-grid">
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">裸眼视力</span>
-                      <span className="drawer-value">{record.rightEye.nakedVision}</span>
+            {canViewDetailedRecords && (
+              <>
+                <section className="drawer-section">
+                  <h3>屈光参数</h3>
+                  <div className="drawer-eye-tables">
+                    <div className="drawer-eye-block">
+                      <p className="drawer-eye-title">右眼 (OD)</p>
+                      <div className="drawer-param-grid">
+                        <div className="drawer-param-item">
+                          <span className="drawer-label">裸眼视力</span>
+                          <span className="drawer-value">{record.rightEye.nakedVision}</span>
+                        </div>
+                        <div className="drawer-param-item">
+                          <span className="drawer-label">矫正视力</span>
+                          <span className="drawer-value">{record.rightEye.correctedVision}</span>
+                        </div>
+                        <div className="drawer-param-item">
+                          <span className="drawer-label">球镜</span>
+                          <span className="drawer-value">{record.rightEye.sphere}D</span>
+                        </div>
+                        <div className="drawer-param-item">
+                          <span className="drawer-label">柱镜</span>
+                          <span className="drawer-value">{record.rightEye.cylinder}D</span>
+                        </div>
+                        <div className="drawer-param-item">
+                          <span className="drawer-label">轴位</span>
+                          <span className="drawer-value">{record.rightEye.axis}°</span>
+                        </div>
+                        <div className="drawer-param-item">
+                          <span className="drawer-label">ADD</span>
+                          <span className="drawer-value">{record.rightEye.add ? record.rightEye.add + "D" : "—"}</span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">矫正视力</span>
-                      <span className="drawer-value">{record.rightEye.correctedVision}</span>
-                    </div>
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">球镜</span>
-                      <span className="drawer-value">{record.rightEye.sphere}D</span>
-                    </div>
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">柱镜</span>
-                      <span className="drawer-value">{record.rightEye.cylinder}D</span>
-                    </div>
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">轴位</span>
-                      <span className="drawer-value">{record.rightEye.axis}°</span>
-                    </div>
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">ADD</span>
-                      <span className="drawer-value">{record.rightEye.add ? record.rightEye.add + "D" : "—"}</span>
+                    <div className="drawer-eye-block">
+                      <p className="drawer-eye-title">左眼 (OS)</p>
+                      <div className="drawer-param-grid">
+                        <div className="drawer-param-item">
+                          <span className="drawer-label">裸眼视力</span>
+                          <span className="drawer-value">{record.leftEye.nakedVision}</span>
+                        </div>
+                        <div className="drawer-param-item">
+                          <span className="drawer-label">矫正视力</span>
+                          <span className="drawer-value">{record.leftEye.correctedVision}</span>
+                        </div>
+                        <div className="drawer-param-item">
+                          <span className="drawer-label">球镜</span>
+                          <span className="drawer-value">{record.leftEye.sphere}D</span>
+                        </div>
+                        <div className="drawer-param-item">
+                          <span className="drawer-label">柱镜</span>
+                          <span className="drawer-value">{record.leftEye.cylinder}D</span>
+                        </div>
+                        <div className="drawer-param-item">
+                          <span className="drawer-label">轴位</span>
+                          <span className="drawer-value">{record.leftEye.axis}°</span>
+                        </div>
+                        <div className="drawer-param-item">
+                          <span className="drawer-label">ADD</span>
+                          <span className="drawer-value">{record.leftEye.add ? record.leftEye.add + "D" : "—"}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="drawer-eye-block">
-                  <p className="drawer-eye-title">左眼 (OS)</p>
-                  <div className="drawer-param-grid">
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">裸眼视力</span>
-                      <span className="drawer-value">{record.leftEye.nakedVision}</span>
-                    </div>
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">矫正视力</span>
-                      <span className="drawer-value">{record.leftEye.correctedVision}</span>
-                    </div>
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">球镜</span>
-                      <span className="drawer-value">{record.leftEye.sphere}D</span>
-                    </div>
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">柱镜</span>
-                      <span className="drawer-value">{record.leftEye.cylinder}D</span>
-                    </div>
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">轴位</span>
-                      <span className="drawer-value">{record.leftEye.axis}°</span>
-                    </div>
-                    <div className="drawer-param-item">
-                      <span className="drawer-label">ADD</span>
-                      <span className="drawer-value">{record.leftEye.add ? record.leftEye.add + "D" : "—"}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
+                </section>
 
-            <section className="drawer-section">
-              <h3>瞳距</h3>
-              <div className="drawer-info-grid">
-                <div className="drawer-info-item">
-                  <span className="drawer-label">瞳距 (PD)</span>
-                  <span className="drawer-value drawer-value-lg">{record.pd}mm</span>
+                <section className="drawer-section">
+                  <h3>瞳距</h3>
+                  <div className="drawer-info-grid">
+                    <div className="drawer-info-item">
+                      <span className="drawer-label">瞳距 (PD)</span>
+                      <span className="drawer-value drawer-value-lg">{record.pd}mm</span>
+                    </div>
+                  </div>
+                </section>
+              </>
+            )}
+
+            {!canViewDetailedRecords && (
+              <section className="drawer-section">
+                <div className="param-restricted-hint">
+                  <span className="param-restricted-icon">🔒</span>
+                  <p className="param-restricted-text">屈光参数、轴位和瞳距需验光师或复查医生权限查看</p>
                 </div>
-              </div>
-            </section>
+              </section>
+            )}
 
             {canViewProfessionalParams && (
               <section className="drawer-section">
@@ -2655,7 +2675,7 @@ function RefractionDrawer({
               <p className={`drawer-recommendation ${!canViewDetailedRecords ? "recommendation-summary" : ""}`}>
                 {canViewDetailedRecords
                   ? record.recommendation
-                  : (record.summary || record.category + " · " + record.type)}
+                  : getVisibleRecordSummary(record, false)}
               </p>
               {!canViewDetailedRecords && (
                 <p className="param-restricted-text" style={{ marginTop: "8px", fontSize: "12px" }}>
@@ -4237,7 +4257,7 @@ function App() {
                 <div className="record-index">{String(index + 1).padStart(2, "0")}</div>
                 <div>
                   <h3>{record.examDate} · <span className={`type-badge type-${record.type}`}>{record.type}</span></h3>
-                  <p>{record.summary}</p>
+                  <p>{getVisibleRecordSummary(record, permission.canViewDetailedRecords)}</p>
                 </div>
               </article>
             ))}
@@ -4313,7 +4333,7 @@ function App() {
                 <div className="record-index">{String(index + 1).padStart(2, "0")}</div>
                 <div>
                   <h3>{record.patientNo} · {record.patientName} · {record.examDate}</h3>
-                  <p>{[record.category, record.type, record.summary].filter(Boolean).join(" · ")}</p>
+                  <p>{getVisibleRecordSummary(record, permission.canViewDetailedRecords)}</p>
                 </div>
               </article>
             ))}
@@ -4461,7 +4481,7 @@ function App() {
               <div className="record-index">{String(index + 1).padStart(2, "0")}</div>
               <div style={{ flex: 1 }}>
                 <h3>{record.patientNo} · {record.patientName} · {record.examDate}</h3>
-                <p>{[record.category, record.type, record.summary].filter(Boolean).join(" · ")}</p>
+                <p>{getVisibleRecordSummary(record, permission.canViewDetailedRecords)}</p>
               </div>
             </article>
             {permission.canExport && (
