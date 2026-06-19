@@ -37,6 +37,7 @@ export interface SyncConfig {
   baseDelay: number;
   failureRate: number;
   conflictRate: number;
+  duplicateSubmissionRate: number;
   autoSync: boolean;
   autoSyncInterval: number;
 }
@@ -45,6 +46,7 @@ export const DEFAULT_SYNC_CONFIG: SyncConfig = {
   baseDelay: 800,
   failureRate: 0.1,
   conflictRate: 0.05,
+  duplicateSubmissionRate: 0.1,
   autoSync: false,
   autoSyncInterval: 30000,
 };
@@ -75,12 +77,15 @@ interface SyncOperationResult<T> {
   data?: T;
   error?: string;
   conflict?: boolean;
+  duplicate?: boolean;
   serverVersion?: number;
 }
 
 class MockSyncServer {
   private data: Map<string, any> = new Map();
   private versions: Map<string, number> = new Map();
+  private recentSubmissions: Map<string, { count: number; firstAt: number }> = new Map();
+  private duplicateWindowMs = 5000;
 
   constructor() {
     this.initializeMockData();
@@ -115,6 +120,21 @@ class MockSyncServer {
     return Math.random() < conflictRate;
   }
 
+  private shouldDetectDuplicate(rate: number): boolean {
+    return Math.random() < rate;
+  }
+
+  private checkDuplicate(key: string): boolean {
+    const now = Date.now();
+    const existing = this.recentSubmissions.get(key);
+    if (existing && now - existing.firstAt < this.duplicateWindowMs) {
+      existing.count++;
+      return existing.count > 1;
+    }
+    this.recentSubmissions.set(key, { count: 1, firstAt: now });
+    return false;
+  }
+
   async pushEntity(
     type: EntityType,
     entity: any,
@@ -130,6 +150,20 @@ class MockSyncServer {
     }
 
     const key = this.makeKey(type, entity.id);
+
+    const submitCount = entity.submitCount || 0;
+    if (submitCount > 1 && this.shouldDetectDuplicate(config.duplicateSubmissionRate)) {
+      const isDuplicate = this.checkDuplicate(key);
+      if (isDuplicate) {
+        const recent = this.recentSubmissions.get(key);
+        return {
+          success: false,
+          error: `检测到重复提交（${submitCount} 次）：请稍后再试，避免重复提交`,
+          duplicate: true,
+        };
+      }
+    }
+
     const currentVersion = this.versions.get(key) || 0;
 
     if (currentVersion > 0 && entity.serverVersion && entity.serverVersion < currentVersion) {
@@ -146,15 +180,22 @@ class MockSyncServer {
     }
 
     const newVersion = currentVersion + 1;
-    const serverEntity = { ...entity, serverVersion: newVersion, updatedAt: new Date().toISOString() };
+    const strippedEntity = this.stripSyncMetadata(entity);
+    const serverEntity = { ...strippedEntity, serverVersion: newVersion, updatedAt: new Date().toISOString() };
     this.data.set(key, serverEntity);
     this.versions.set(key, newVersion);
+    this.recentSubmissions.delete(key);
 
     return {
       success: true,
       data: serverEntity,
       serverVersion: newVersion,
     };
+  }
+
+  private stripSyncMetadata(entity: any): any {
+    const { syncStatus, syncError, lastSyncAttempt, lastSyncedAt, serverVersion, localVersion, submitCount, isSubmitting, conflictData, ...businessData } = entity;
+    return businessData;
   }
 
   async pullEntity(
@@ -221,8 +262,16 @@ class MockSyncServer {
     const key = this.makeKey(type, id);
     const currentVersion = this.versions.get(key) || 0;
     const newVersion = currentVersion + 1;
-    this.data.set(key, { ...modifiedData, serverVersion: newVersion, updatedAt: new Date().toISOString() });
+    const strippedData = this.stripSyncMetadata(modifiedData);
+    this.data.set(key, { ...strippedData, serverVersion: newVersion, updatedAt: new Date().toISOString() });
     this.versions.set(key, newVersion);
+  }
+
+  initializeServerData(type: EntityType, id: string, data: any, version: number = 1): void {
+    const key = this.makeKey(type, id);
+    const strippedData = this.stripSyncMetadata(data);
+    this.data.set(key, { ...strippedData, serverVersion: version, updatedAt: new Date().toISOString() });
+    this.versions.set(key, version);
   }
 
   getServerData(): Map<string, any> {
@@ -231,6 +280,12 @@ class MockSyncServer {
 }
 
 export const mockServer = new MockSyncServer();
+
+export function stripSyncMetadata(entity: any): any {
+  if (!entity) return entity;
+  const { syncStatus, syncError, lastSyncAttempt, lastSyncedAt, serverVersion, localVersion, submitCount, isSubmitting, conflictData, ...businessData } = entity;
+  return businessData;
+}
 
 export function createSyncableEntity<T extends { id: string }>(
   entity: T,

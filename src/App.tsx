@@ -43,6 +43,7 @@ import {
   resolveConflictKeepServer,
   calculateSyncStats,
   computeFieldDiffs,
+  stripSyncMetadata,
   formatSyncTime,
 } from "./sync";
 
@@ -3670,7 +3671,12 @@ function App() {
           if (persistedData.patients.length > 0) {
             const hasSyncStatus = persistedData.patients.some((p: any) => p.syncStatus);
             if (hasSyncStatus) {
-              setPatients(persistedData.patients as SyncablePatient[]);
+              const migratedPatients = persistedData.patients.map((p: any) => ({
+                ...p,
+                submitCount: p.submitCount ?? 0,
+                isSubmitting: false,
+              }));
+              setPatients(migratedPatients as SyncablePatient[]);
             } else {
               const syncablePatients = persistedData.patients.map(p => 
                 createSyncableEntity(p, "synced")
@@ -3680,16 +3686,38 @@ function App() {
           } else if (wasCleared) {
             setPatients([]);
           } else {
-            const patientsWithSync = initialPatients.map((p, idx) => 
-              createSyncableEntity(p, idx < 5 ? "synced" : idx < 7 ? "pending" : idx < 9 ? "conflict" : "failed")
-            );
+            const patientsWithSync = initialPatients.map((p, idx) => {
+              const status: SyncStatus = idx < 5 ? "synced" : idx < 7 ? "pending" : idx < 9 ? "conflict" : "failed";
+              const syncable = createSyncableEntity(p, status);
+              if (status === "conflict") {
+                const stripped = stripSyncMetadata(syncable);
+                const serverData = {
+                  ...stripped,
+                  remark: (stripped as any).remark ? `${(stripped as any).remark} (服务端已更新)` : "服务端更新备注",
+                  lastCheckDate: "2026-06-15",
+                  serverVersion: 2,
+                  updatedAt: new Date().toISOString(),
+                };
+                mockServer.initializeServerData("patient", syncable.id, serverData, 2);
+                return markConflict(syncable, serverData, "update-update");
+              }
+              if (status === "synced") {
+                mockServer.initializeServerData("patient", syncable.id, stripSyncMetadata(syncable), 1);
+              }
+              return syncable;
+            });
             setPatients(patientsWithSync);
           }
 
           if (persistedData.records.length > 0) {
             const hasSyncStatus = persistedData.records.some((r: any) => r.syncStatus);
             if (hasSyncStatus) {
-              setRecords(persistedData.records as SyncableRecord[]);
+              const migratedRecords = persistedData.records.map((r: any) => ({
+                ...r,
+                submitCount: r.submitCount ?? 0,
+                isSubmitting: false,
+              }));
+              setRecords(migratedRecords as SyncableRecord[]);
             } else {
               const syncableRecords = persistedData.records.map(r => 
                 createSyncableEntity(r, "synced")
@@ -3699,9 +3727,26 @@ function App() {
           } else if (recordsPersisted || wasCleared) {
             setRecords([]);
           } else {
-            const recordsWithSync = refractionRecords.map((r, idx) => 
-              createSyncableEntity(r, idx < 8 ? "synced" : idx < 12 ? "pending" : idx < 14 ? "conflict" : "failed")
-            );
+            const recordsWithSync = refractionRecords.map((r, idx) => {
+              const status: SyncStatus = idx < 8 ? "synced" : idx < 12 ? "pending" : idx < 14 ? "conflict" : "failed";
+              const syncable = createSyncableEntity(r, status);
+              if (status === "conflict") {
+                const stripped = stripSyncMetadata(syncable);
+                const serverData = {
+                  ...stripped,
+                  summary: (stripped as any).summary ? `${(stripped as any).summary} (服务端已修订)` : "服务端修订摘要",
+                  recommendation: "服务端配镜建议更新",
+                  serverVersion: 2,
+                  updatedAt: new Date().toISOString(),
+                };
+                mockServer.initializeServerData("record", syncable.id, serverData, 2);
+                return markConflict(syncable, serverData, "update-update");
+              }
+              if (status === "synced") {
+                mockServer.initializeServerData("record", syncable.id, stripSyncMetadata(syncable), 1);
+              }
+              return syncable;
+            });
             setRecords(recordsWithSync);
           }
 
@@ -3900,9 +3945,9 @@ function App() {
           updatedList[updatedIdx] = markSynced(updatedList[updatedIdx], result.serverVersion);
           showSyncMessage("同步成功");
         } else if (result.error) {
-          const isDuplicate = (updatedList[updatedIdx] as any).submitCount > 1;
+          const isDuplicate = !!(result as any).duplicate || (updatedList[updatedIdx] as any).submitCount > 1;
           updatedList[updatedIdx] = markFailed(updatedList[updatedIdx], isDuplicate ? `${result.error}（已尝试 ${(updatedList[updatedIdx] as any).submitCount} 次提交）` : result.error);
-          showSyncMessage(`同步失败：${result.error}${isDuplicate ? `（第 ${(updatedList[updatedIdx] as any).submitCount} 次提交）` : ""}`);
+          showSyncMessage(`${isDuplicate ? "⚠️ " : ""}同步失败：${result.error}`);
         }
         setList(updatedList as any);
       }
@@ -3962,10 +4007,16 @@ function App() {
     const entity = list.find(e => e.id === id);
     if (!entity) return;
 
+    const strippedEntity = stripSyncMetadata(entity);
     const modifiedData = {
-      ...entity,
-      remark: (entity as any).remark ? `${(entity as any).remark} (服务端已更新)` : "服务端更新备注",
+      ...strippedEntity,
+      remark: (strippedEntity as any).remark ? `${(strippedEntity as any).remark} (服务端已更新)` : "服务端更新备注",
+      lastCheckDate: (strippedEntity as any).lastCheckDate || "2026-06-15",
+      updatedAt: new Date().toISOString(),
     };
+    const currentServerVersion = (entity as any).serverVersion || 1;
+    modifiedData.serverVersion = currentServerVersion + 1;
+
     mockServer.generateServerConflict(type, id, modifiedData);
     
     const setList = type === "patient" ? setPatients : setRecords;
@@ -5500,9 +5551,21 @@ function App() {
                     />
                     <span className="sync-config-value">{Math.round(syncConfig.conflictRate * 100)}%</span>
                   </div>
+                  <div className="sync-config-item">
+                    <label>重复提交检测率</label>
+                    <input 
+                      type="range" 
+                      min="0" 
+                      max="0.5" 
+                      step="0.05"
+                      value={syncConfig.duplicateSubmissionRate}
+                      onChange={(e) => handleUpdateSyncConfig({ duplicateSubmissionRate: Number(e.target.value) })}
+                    />
+                    <span className="sync-config-value">{Math.round(syncConfig.duplicateSubmissionRate * 100)}%</span>
+                  </div>
                 </div>
                 <p className="sync-config-hint">
-                  💡 以上参数用于模拟网络环境，方便测试各种同步场景
+                  💡 以上参数用于模拟网络环境，方便测试各种同步场景。重复提交检测：多次重试时触发。
                 </p>
               </div>
 
