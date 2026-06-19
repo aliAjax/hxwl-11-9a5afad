@@ -254,6 +254,19 @@ export async function saveClearedFlag(cleared: boolean): Promise<void> {
   });
 }
 
+export async function saveRecordsPersistedFlag(persisted: boolean): Promise<void> {
+  const db = await initDB();
+  if (!db) return;
+
+  return withTransaction(STORE_FILTERS, "readwrite", (store) => {
+    return new Promise<void>((resolve, reject) => {
+      const request = store.put({ key: "recordsPersisted", value: persisted });
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+  });
+}
+
 export async function getClearedFlag(): Promise<boolean> {
   const db = await initDB();
   if (!db) return false;
@@ -269,6 +282,21 @@ export async function getClearedFlag(): Promise<boolean> {
   });
 }
 
+export async function getRecordsPersistedFlag(): Promise<boolean> {
+  const db = await initDB();
+  if (!db) return false;
+
+  return withTransaction(STORE_FILTERS, "readonly", (store) => {
+    return new Promise<boolean>((resolve, reject) => {
+      const request = store.get("recordsPersisted");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        resolve(!!request.result?.value);
+      };
+    });
+  });
+}
+
 export async function saveAllData(data: AppData): Promise<void> {
   await Promise.all([
     savePatients(data.patients),
@@ -276,6 +304,7 @@ export async function saveAllData(data: AppData): Promise<void> {
     saveFilters(data.filters),
     saveReminders(data.reminders),
   ]);
+  await saveRecordsPersistedFlag(true);
 }
 
 export async function getPatients(): Promise<PatientProfile[]> {

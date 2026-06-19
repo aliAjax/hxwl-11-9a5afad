@@ -11,6 +11,7 @@ import {
   saveFilters,
   saveClearedFlag,
   getClearedFlag,
+  getRecordsPersistedFlag,
   type AppData,
   type FilterState,
   type ReminderData,
@@ -3022,6 +3023,7 @@ function App() {
         if (db) {
           setDbReady(true);
           const wasCleared = await getClearedFlag();
+          const recordsPersisted = await getRecordsPersistedFlag();
           const persistedData = await getAllData();
           if (persistedData.patients.length > 0) {
             setPatients(persistedData.patients);
@@ -3030,7 +3032,7 @@ function App() {
           }
           if (persistedData.records.length > 0) {
             setRecords(persistedData.records);
-          } else if (wasCleared) {
+          } else if (recordsPersisted || wasCleared) {
             setRecords([]);
           }
           if (persistedData.filters.comparisonFilter) {
