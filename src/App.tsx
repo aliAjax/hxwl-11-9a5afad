@@ -2745,7 +2745,8 @@ function PatientCard({
   canEdit,
   canDelete,
   workflowProgress,
-  role
+  role,
+  computedStepDetails
 }: {
   patient: SyncablePatient;
   index: number;
@@ -2760,6 +2761,7 @@ function PatientCard({
   canDelete: boolean;
   workflowProgress?: WorkflowStepProgress | null;
   role?: UserRole;
+  computedStepDetails?: Record<WorkflowStep, StepInfo>;
 }) {
   const syncStatus = ((patient as any).syncStatus || "synced") as SyncStatus;
   const isSubmitting = (patient as any).isSubmitting;
@@ -2780,6 +2782,10 @@ function PatientCard({
   };
 
   const computeMiniStepInfo = (step: WorkflowStep): { status: string; blockReason?: string } => {
+    if (computedStepDetails && computedStepDetails[step]) {
+      const s = computedStepDetails[step];
+      return { status: s.status, blockReason: s.blockDetail };
+    }
     if (!role) return { status: "unknown" };
     const rolePerm = ROLE_PERMISSIONS[role];
     const permissionMap: Record<WorkflowStep, keyof RolePermission> = {
@@ -6698,8 +6704,12 @@ function App() {
       )}
 
       <div className="patient-list">
-        {filteredPatients.map((patient, index) => (
-          editingId === patient.id ? null : (
+        {filteredPatients.map((patient, index) => {
+          const patientStepDetails = {} as Record<WorkflowStep, StepInfo>;
+          (["patient-profile", "initial-exam", "recheck-compare", "prescription-summary", "export"] as WorkflowStep[]).forEach(step => {
+            patientStepDetails[step] = computeStepInfo(step, patient.patientNo, currentRole);
+          });
+          return editingId === patient.id ? null : (
             <PatientCard
               key={patient.id}
               patient={patient as SyncablePatient}
@@ -6721,9 +6731,10 @@ function App() {
               canDelete={permission.canEditPatientProfile}
               workflowProgress={workflowProgressMap[patient.patientNo]}
               role={currentRole}
+              computedStepDetails={patientStepDetails}
             />
-          )
-        ))}
+          );
+        })}
         {filteredPatients.length === 0 && (
           <div className="empty-state">
             <p>暂无患者档案</p>
