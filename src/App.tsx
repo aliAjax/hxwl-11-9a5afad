@@ -39,6 +39,8 @@ import {
   type SyncConfig,
   type EntityType,
   type FieldDiff,
+  type FieldResolution,
+  type FieldChoice,
   DEFAULT_SYNC_CONFIG,
   SYNC_STATUS_LABELS,
   SYNC_STATUS_COLORS,
@@ -49,9 +51,11 @@ import {
   markSynced,
   markFailed,
   markConflict,
+  markConflictWithHistory,
   markSubmitting,
   resolveConflictKeepLocal,
   resolveConflictKeepServer,
+  resolveConflictWithMerge,
   calculateSyncStats,
   computeFieldDiffs,
   stripSyncMetadata,
@@ -4425,6 +4429,7 @@ function App() {
   const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [showConflictModal, setShowConflictModal] = useState(false);
   const [conflictEntity, setConflictEntity] = useState<{ type: EntityType; entity: any } | null>(null);
+  const [fieldResolutions, setFieldResolutions] = useState<Record<string, FieldChoice>>({});
   const [showSyncErrorModal, setShowSyncErrorModal] = useState(false);
   const [syncErrorEntity, setSyncErrorEntity] = useState<{ type: EntityType; entity: any } | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
@@ -4961,7 +4966,7 @@ function App() {
                   updatedAt: new Date().toISOString(),
                 };
                 mockServer.initializeServerData("patient", syncable.id, serverData, 2);
-                return markConflict(syncable, serverData, "update-update");
+                return markConflictWithHistory(syncable, serverData, "update-update");
               }
               if (status === "synced") {
                 mockServer.initializeServerData("patient", syncable.id, stripSyncMetadata(syncable), 1);
@@ -5002,7 +5007,7 @@ function App() {
                   updatedAt: new Date().toISOString(),
                 };
                 mockServer.initializeServerData("record", syncable.id, serverData, 2);
-                return markConflict(syncable, serverData, "update-update");
+                return markConflictWithHistory(syncable, serverData, "update-update");
               }
               if (status === "synced") {
                 mockServer.initializeServerData("record", syncable.id, stripSyncMetadata(syncable), 1);
@@ -5230,7 +5235,7 @@ function App() {
           if (idx !== -1) {
             const submittedEntity = submittingPatients.find(p => p.id === id) || updatedPatients[idx];
             if (result.conflict && result.data) {
-              updatedPatients[idx] = markConflict(submittedEntity, result.data, "update-update");
+              updatedPatients[idx] = markConflictWithHistory(submittedEntity, result.data, "update-update");
               conflictCount++;
             } else if (result.success && result.serverVersion) {
               updatedPatients[idx] = markSynced(submittedEntity, result.serverVersion);
@@ -5260,7 +5265,7 @@ function App() {
           if (idx !== -1) {
             const submittedEntity = submittingRecords.find(r => r.id === id) || updatedRecords[idx];
             if (result.conflict && result.data) {
-              updatedRecords[idx] = markConflict(submittedEntity, result.data, "update-update");
+              updatedRecords[idx] = markConflictWithHistory(submittedEntity, result.data, "update-update");
               conflictCount++;
             } else if (result.success && result.serverVersion) {
               updatedRecords[idx] = markSynced(submittedEntity, result.serverVersion);
@@ -5314,7 +5319,7 @@ function App() {
       
       if (updatedIdx !== -1) {
         if (result.conflict && result.data) {
-          updatedList[updatedIdx] = markConflict(submittingEntity, result.data, "update-update");
+          updatedList[updatedIdx] = markConflictWithHistory(submittingEntity, result.data, "update-update");
           showSyncMessage("检测到数据冲突，请处理后再同步");
         } else if (result.success && result.serverVersion) {
           updatedList[updatedIdx] = markSynced(submittingEntity, result.serverVersion);
@@ -5358,12 +5363,15 @@ function App() {
     setTimeout(() => handleSyncAll(), 100);
   }, [patients, records, showSyncMessage, handleSyncAll]);
 
-  const handleResolveConflict = useCallback((type: EntityType, id: string, keepLocal: boolean) => {
+  const handleResolveConflict = useCallback((type: EntityType, id: string, keepLocal: boolean, resolutions?: FieldResolution[]) => {
     const list = type === "patient" ? patients : records;
     const setList = type === "patient" ? setPatients : setRecords;
     
     const updatedList = list.map(entity => {
       if (entity.id !== id) return entity;
+      if (resolutions && resolutions.length > 0) {
+        return resolveConflictWithMerge(entity, resolutions);
+      }
       if (keepLocal) {
         return resolveConflictKeepLocal(entity);
       } else {
@@ -5374,7 +5382,11 @@ function App() {
     setList(updatedList as any);
     setShowConflictModal(false);
     setConflictEntity(null);
-    showSyncMessage(keepLocal ? "已保留本地版本，待重新同步" : "已采用服务端版本");
+    setFieldResolutions({});
+    const message = resolutions && resolutions.length > 0
+      ? `已完成字段级合并（${resolutions.length} 个字段），待重新同步`
+      : (keepLocal ? "已保留本地版本，待重新同步" : "已采用服务端版本");
+    showSyncMessage(message);
   }, [patients, records, showSyncMessage]);
 
   const handleGenerateConflict = useCallback((type: EntityType, id: string) => {
@@ -5396,7 +5408,7 @@ function App() {
     
     const setList = type === "patient" ? setPatients : setRecords;
     const updatedList = list.map(e => 
-      e.id === id ? markConflict(e, modifiedData, "update-update") : e
+      e.id === id ? markConflictWithHistory(e, modifiedData, "update-update") : e
     );
     setList(updatedList as any);
     showSyncMessage("已模拟生成服务端冲突");
@@ -5414,6 +5426,13 @@ function App() {
 
   const openConflictModal = useCallback((type: EntityType, entity: any) => {
     setConflictEntity({ type, entity });
+    const fieldDiffs = computeFieldDiffs(type, entity, entity.conflictData?.serverData);
+    const changedFields = fieldDiffs.filter(d => d.isDifferent);
+    const initialResolutions: Record<string, FieldChoice> = {};
+    changedFields.forEach(diff => {
+      initialResolutions[diff.field] = "local";
+    });
+    setFieldResolutions(initialResolutions);
     setShowConflictModal(true);
   }, []);
 
@@ -7837,12 +7856,56 @@ function App() {
         );
         const changedFields = fieldDiffs.filter(d => d.isDifferent);
         const unchangedFields = fieldDiffs.filter(d => !d.isDifferent);
+        const mergeHistory = conflictEntity.entity.conflictData?.mergeHistory || [];
+
+        const handleFieldChoiceChange = (field: string, choice: FieldChoice) => {
+          setFieldResolutions(prev => ({
+            ...prev,
+            [field]: choice
+          }));
+        };
+
+        const handleSelectAllLocal = () => {
+          const allLocal: Record<string, FieldChoice> = {};
+          changedFields.forEach(diff => {
+            allLocal[diff.field] = "local";
+          });
+          setFieldResolutions(allLocal);
+        };
+
+        const handleSelectAllServer = () => {
+          const allServer: Record<string, FieldChoice> = {};
+          changedFields.forEach(diff => {
+            allServer[diff.field] = "server";
+          });
+          setFieldResolutions(allServer);
+        };
+
+        const handleToggleAll = () => {
+          const toggled: Record<string, FieldChoice> = {};
+          changedFields.forEach(diff => {
+            const current = fieldResolutions[diff.field] || "local";
+            toggled[diff.field] = current === "local" ? "server" : "local";
+          });
+          setFieldResolutions(toggled);
+        };
+
+        const handleMerge = () => {
+          const resolutions: FieldResolution[] = changedFields.map(diff => ({
+            field: diff.field,
+            choice: fieldResolutions[diff.field] || "local"
+          }));
+          handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, true, resolutions);
+        };
+
+        const localCount = Object.values(fieldResolutions).filter(c => c === "local").length;
+        const serverCount = Object.values(fieldResolutions).filter(c => c === "server").length;
 
         return (
           <div className="modal-overlay" onClick={() => setShowConflictModal(false)}>
-            <div className="modal-dialog modal-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-dialog modal-xl conflict-merge-modal" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
-                <h3>处理数据冲突</h3>
+                <h3>字段级冲突合并</h3>
                 <button className="modal-close" onClick={() => setShowConflictModal(false)}>✕</button>
               </div>
               <div className="modal-body">
@@ -7850,7 +7913,7 @@ function App() {
                   <div className="conflict-warning-icon">⚠️</div>
                   <div className="conflict-warning-text">
                     <strong>检测到数据冲突</strong>
-                    <p>该记录的本地版本与服务端版本不一致，请选择保留哪个版本。</p>
+                    <p>该记录的本地版本与服务端版本不一致。请逐项选择保留哪一侧的值，或使用快捷操作批量选择。</p>
                   </div>
                 </div>
 
@@ -7869,22 +7932,109 @@ function App() {
                   </span>
                 </div>
 
+                {mergeHistory.length > 0 && (
+                  <div className="merge-history-section">
+                    <div className="merge-history-header" onClick={() => {
+                      const details = document.querySelector('.merge-history-details') as HTMLDetailsElement;
+                      if (details) details.open = !details.open;
+                    }}>
+                      <span className="merge-history-icon">📋</span>
+                      <span>历史合并记录（{mergeHistory.length} 次）</span>
+                      <span className="merge-history-toggle">▼</span>
+                    </div>
+                    <details className="merge-history-details">
+                      <summary style={{ display: 'none' }}></summary>
+                      <div className="merge-history-list">
+                        {mergeHistory.map((history, idx) => (
+                          <div key={idx} className="merge-history-item">
+                            <div className="merge-history-time">
+                              {new Date(history.mergeTimestamp).toLocaleString('zh-CN')}
+                            </div>
+                            <div className="merge-history-version">
+                              服务端版本: v{history.serverVersionAtMerge}
+                            </div>
+                            <div className="merge-history-resolutions">
+                              {history.resolutions.map((r, ridx) => (
+                                <span key={ridx} className={`merge-resolution-tag ${r.choice}`}>
+                                  {r.field}: {r.choice === 'local' ? '本地' : '服务端'}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  </div>
+                )}
+
                 {changedFields.length > 0 && (
                   <div className="conflict-diff-section">
-                    <h4 className="conflict-diff-title">变更字段（{changedFields.length} 处差异）</h4>
-                    <div className="conflict-diff-table">
-                      <div className="conflict-diff-header">
-                        <span className="diff-col-label">字段</span>
-                        <span className="diff-col-local">本地值</span>
-                        <span className="diff-col-server">服务端值</span>
+                    <div className="conflict-diff-header-row">
+                      <h4 className="conflict-diff-title">变更字段（{changedFields.length} 处差异）</h4>
+                      <div className="conflict-bulk-actions">
+                        <button className="bulk-action-btn" onClick={handleSelectAllLocal}>
+                          全选本地
+                        </button>
+                        <button className="bulk-action-btn" onClick={handleSelectAllServer}>
+                          全选服务端
+                        </button>
+                        <button className="bulk-action-btn" onClick={handleToggleAll}>
+                          反选
+                        </button>
                       </div>
-                      {changedFields.map(diff => (
-                        <div key={diff.field} className="conflict-diff-row diff-changed">
-                          <span className="diff-col-label">{diff.label}</span>
-                          <span className="diff-col-local diff-highlight-local">{String(diff.localValue)}</span>
-                          <span className="diff-col-server diff-highlight-server">{String(diff.serverValue)}</span>
-                        </div>
-                      ))}
+                    </div>
+
+                    <div className="conflict-merge-summary">
+                      <span className="merge-summary-item local">
+                        保留本地: <strong>{localCount}</strong> 项
+                      </span>
+                      <span className="merge-summary-item server">
+                        采用服务端: <strong>{serverCount}</strong> 项
+                      </span>
+                      <span className="merge-summary-item pending">
+                        未选择: <strong>{changedFields.length - localCount - serverCount}</strong> 项
+                      </span>
+                    </div>
+
+                    <div className="conflict-merge-table">
+                      <div className="conflict-merge-header">
+                        <span className="merge-col-field">字段</span>
+                        <span className="merge-col-choice">选择</span>
+                        <span className="merge-col-local">本地值</span>
+                        <span className="merge-col-server">服务端值</span>
+                      </div>
+                      {changedFields.map(diff => {
+                        const choice = fieldResolutions[diff.field] || "local";
+                        return (
+                          <div key={diff.field} className={`conflict-merge-row merge-choice-${choice}`}>
+                            <span className="merge-col-field">{diff.label}</span>
+                            <span className="merge-col-choice">
+                              <div className="choice-toggle-group">
+                                <button
+                                  className={`choice-toggle ${choice === 'local' ? 'active local' : ''}`}
+                                  onClick={() => handleFieldChoiceChange(diff.field, 'local')}
+                                  title="保留本地值"
+                                >
+                                  本地
+                                </button>
+                                <button
+                                  className={`choice-toggle ${choice === 'server' ? 'active server' : ''}`}
+                                  onClick={() => handleFieldChoiceChange(diff.field, 'server')}
+                                  title="采用服务端值"
+                                >
+                                  服务端
+                                </button>
+                              </div>
+                            </span>
+                            <span className={`merge-col-local ${choice === 'local' ? 'selected' : ''}`}>
+                              {String(diff.localValue)}
+                            </span>
+                            <span className={`merge-col-server ${choice === 'server' ? 'selected' : ''}`}>
+                              {String(diff.serverValue)}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -7910,12 +8060,13 @@ function App() {
                 )}
 
                 <div className="conflict-diff-hint">
-                  <p><strong>差异说明：</strong></p>
+                  <p><strong>合并说明：</strong></p>
                   <ul>
-                    <li>红色高亮为本地修改的字段值</li>
-                    <li>蓝色高亮为服务端更新的字段值</li>
-                    <li>选择"保留本地版本"后，本地值将重新排队等待同步到服务端</li>
-                    <li>选择"采用服务端版本"后，本地修改将被服务端值覆盖</li>
+                    <li><span className="choice-indicator local">本地</span> 选中时，该字段将保留本地修改的值</li>
+                    <li><span className="choice-indicator server">服务端</span> 选中时，该字段将采用服务端更新的值</li>
+                    <li>确认合并后，系统将按照您的选择组合生成最终记录</li>
+                    <li>合并后的记录将重新进入待同步状态，等待同步到服务端</li>
+                    <li>如再次同步时遇到新的冲突，历史合并记录会被保留供参考</li>
                   </ul>
                 </div>
               </div>
@@ -7927,13 +8078,19 @@ function App() {
                   className="secondary-btn"
                   onClick={() => handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, false)}
                 >
-                  采用服务端版本
+                  全部采用服务端
                 </button>
                 <button 
-                  className="primary-action"
+                  className="secondary-btn"
                   onClick={() => handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, true)}
                 >
-                  保留本地版本
+                  全部保留本地
+                </button>
+                <button 
+                  className="primary-action merge-confirm-btn"
+                  onClick={handleMerge}
+                >
+                  ✓ 确认字段级合并
                 </button>
               </div>
             </div>

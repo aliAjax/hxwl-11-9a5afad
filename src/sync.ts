@@ -14,11 +14,7 @@ export interface SyncMetadata {
   localVersion: number;
   submitCount: number;
   isSubmitting: boolean;
-  conflictData?: {
-    serverData: any;
-    localData: any;
-    conflictType: "update-update" | "update-delete" | "delete-update";
-  };
+  conflictData?: ConflictData;
 }
 
 export interface SyncablePatient extends PatientProfile, SyncMetadata {}
@@ -412,6 +408,30 @@ export interface FieldDiff {
   isDifferent: boolean;
 }
 
+export type FieldChoice = "local" | "server";
+
+export interface FieldResolution {
+  field: string;
+  choice: FieldChoice;
+}
+
+export interface MergeResult<T> {
+  mergedData: T;
+  resolutions: FieldResolution[];
+  mergeTimestamp: string;
+}
+
+export interface ConflictData {
+  serverData: any;
+  localData: any;
+  conflictType: "update-update" | "update-delete" | "delete-update";
+  mergeHistory?: Array<{
+    mergeTimestamp: string;
+    resolutions: FieldResolution[];
+    serverVersionAtMerge: number;
+  }>;
+}
+
 const PATIENT_FIELD_LABELS: Record<string, string> = {
   patientNo: "患者编号",
   name: "姓名",
@@ -483,4 +503,108 @@ export function computeFieldDiffs(
   }
 
   return diffs;
+}
+
+function getNestedValue(obj: any, path: string): any {
+  if (!obj) return undefined;
+  const keys = path.split(".");
+  let current = obj;
+  for (const key of keys) {
+    if (current === undefined || current === null) return undefined;
+    current = current[key];
+  }
+  return current;
+}
+
+function setNestedValue(obj: any, path: string, value: any): void {
+  if (!obj) return;
+  const keys = path.split(".");
+  let current = obj;
+  for (let i = 0; i < keys.length - 1; i++) {
+    const key = keys[i];
+    if (!current[key]) {
+      current[key] = {};
+    }
+    current = current[key];
+  }
+  current[keys[keys.length - 1]] = value;
+}
+
+export function mergeEntitiesByFieldChoices<T extends SyncMetadata>(
+  entity: T,
+  resolutions: FieldResolution[]
+): T {
+  const localData = stripSyncMetadata(entity);
+  const serverData = entity.conflictData?.serverData ? stripSyncMetadata(entity.conflictData.serverData) : {};
+  const mergedData: any = { ...localData };
+
+  resolutions.forEach(({ field, choice }) => {
+    const sourceData = choice === "local" ? localData : serverData;
+    const value = getNestedValue(sourceData, field);
+    if (value !== undefined) {
+      setNestedValue(mergedData, field, value);
+    } else {
+      const keys = field.split(".");
+      if (keys.length === 1) {
+        delete mergedData[field];
+      }
+    }
+  });
+
+  return mergedData;
+}
+
+export function resolveConflictWithMerge<T extends SyncMetadata>(
+  entity: T,
+  resolutions: FieldResolution[]
+): T {
+  if (!entity.conflictData) return entity;
+
+  const mergedData = mergeEntitiesByFieldChoices(entity, resolutions);
+  const serverVersion = entity.conflictData.serverData?.serverVersion;
+
+  const existingMergeHistory = entity.conflictData.mergeHistory || [];
+  const newMergeHistory = [
+    ...existingMergeHistory,
+    {
+      mergeTimestamp: new Date().toISOString(),
+      resolutions,
+      serverVersionAtMerge: serverVersion || 0,
+    },
+  ];
+
+  return {
+    ...entity,
+    ...mergedData,
+    syncStatus: "pending" as SyncStatus,
+    conflictData: {
+      ...entity.conflictData,
+      mergeHistory: newMergeHistory,
+    },
+    localVersion: entity.localVersion + 1,
+    lastSyncAttempt: new Date().toISOString(),
+    isSubmitting: false,
+  };
+}
+
+export function markConflictWithHistory<T extends SyncMetadata>(
+  entity: T,
+  serverData: any,
+  conflictType: "update-update" | "update-delete" | "delete-update"
+): T {
+  const existingConflictData = entity.conflictData;
+  const mergeHistory = existingConflictData?.mergeHistory;
+
+  return {
+    ...entity,
+    syncStatus: "conflict" as SyncStatus,
+    conflictData: {
+      serverData,
+      localData: entity,
+      conflictType,
+      mergeHistory,
+    },
+    lastSyncAttempt: new Date().toISOString(),
+    isSubmitting: false,
+  };
 }
