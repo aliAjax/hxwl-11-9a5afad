@@ -767,24 +767,77 @@ interface ParseErrorRow {
 interface CsvParseResult {
   validRows: ParsedRecordRow[];
   errorRows: ParseErrorRow[];
+  missingRequired: string[];
+  extraColumns: string[];
+  headerMapping: Record<string, number>;
 }
 
-const CSV_FIXED_COLUMNS = [
-  "患者编号",
-  "患者姓名",
-  "分类",
-  "类型",
-  "年龄段",
-  "检查日期",
-  "右眼球镜",
-  "右眼柱镜",
-  "右眼轴位",
-  "左眼球镜",
-  "左眼柱镜",
-  "左眼轴位",
-  "瞳距",
-  "建议"
+interface CsvFieldMapping {
+  key: string;
+  required: boolean;
+  label: string;
+  aliases: string[];
+}
+
+const CSV_FIELD_MAPPINGS: CsvFieldMapping[] = [
+  { key: "patientNo", required: true, label: "患者编号", aliases: ["患者编号", "编号", "patientNo", "patient_no", "患者号", "病案号"] },
+  { key: "patientName", required: true, label: "患者姓名", aliases: ["患者姓名", "姓名", "patientName", "patient_name", "名字", "患者名"] },
+  { key: "category", required: true, label: "分类", aliases: ["分类", "category", "类别", "诊断分类"] },
+  { key: "examDate", required: true, label: "检查日期", aliases: ["检查日期", "examDate", "exam_date", "日期", "检查时间", "验光日期"] },
+  { key: "rightSphere", required: true, label: "右眼球镜", aliases: ["右眼球镜", "rightSphere", "right_sphere", "右眼DS", "OD球镜", "R球镜"] },
+  { key: "rightCylinder", required: true, label: "右眼柱镜", aliases: ["右眼柱镜", "rightCylinder", "right_cylinder", "右眼DC", "OD柱镜", "R柱镜"] },
+  { key: "rightAxis", required: true, label: "右眼轴位", aliases: ["右眼轴位", "rightAxis", "right_axis", "右眼AX", "OD轴位", "R轴位"] },
+  { key: "leftSphere", required: true, label: "左眼球镜", aliases: ["左眼球镜", "leftSphere", "left_sphere", "左眼DS", "OS球镜", "L球镜"] },
+  { key: "leftCylinder", required: true, label: "左眼柱镜", aliases: ["左眼柱镜", "leftCylinder", "left_cylinder", "左眼DC", "OS柱镜", "L柱镜"] },
+  { key: "leftAxis", required: true, label: "左眼轴位", aliases: ["左眼轴位", "leftAxis", "left_axis", "左眼AX", "OS轴位", "L轴位"] },
+  { key: "type", required: false, label: "类型", aliases: ["类型", "type", "检查类型", "验光类型"] },
+  { key: "ageGroup", required: false, label: "年龄段", aliases: ["年龄段", "ageGroup", "age_group", "年龄"] },
+  { key: "pd", required: false, label: "瞳距", aliases: ["瞳距", "pd", "PD", "瞳距PD"] },
+  { key: "recommendation", required: false, label: "建议", aliases: ["建议", "recommendation", "验配建议", "备注"] }
 ];
+
+const CSV_REQUIRED_LABELS = CSV_FIELD_MAPPINGS.filter(f => f.required).map(f => f.label);
+
+function matchHeaderToField(headerName: string): CsvFieldMapping | null {
+  const trimmed = headerName.trim();
+  for (const mapping of CSV_FIELD_MAPPINGS) {
+    if (mapping.aliases.some(a => a.toLowerCase() === trimmed.toLowerCase())) {
+      return mapping;
+    }
+  }
+  return null;
+}
+
+interface HeaderMappingResult {
+  mapping: Record<string, number>;
+  missingRequired: string[];
+  extraColumns: string[];
+}
+
+function buildHeaderMapping(headerFields: string[]): HeaderMappingResult {
+  const mapping: Record<string, number> = {};
+  const missingRequired: string[] = [];
+  const extraColumns: string[] = [];
+  const matchedKeys = new Set<string>();
+
+  for (let colIdx = 0; colIdx < headerFields.length; colIdx++) {
+    const fieldMapping = matchHeaderToField(headerFields[colIdx]);
+    if (fieldMapping) {
+      mapping[fieldMapping.key] = colIdx;
+      matchedKeys.add(fieldMapping.key);
+    } else {
+      extraColumns.push(headerFields[colIdx].trim());
+    }
+  }
+
+  for (const field of CSV_FIELD_MAPPINGS) {
+    if (field.required && !matchedKeys.has(field.key)) {
+      missingRequired.push(field.label);
+    }
+  }
+
+  return { mapping, missingRequired, extraColumns };
+}
 
 function parseCsvLine(line: string): string[] {
   const result: string[] = [];
@@ -957,29 +1010,29 @@ function validateCurvature(value: string): FieldError | undefined {
   return undefined;
 }
 
-function validateAndBuildRecord(fields: string[], rowIndex: number): { record?: ParsedRecordRow; errors?: string[] } {
+function getField(fields: string[], mapping: Record<string, number>, key: string): string | undefined {
+  const idx = mapping[key];
+  if (idx === undefined || idx >= fields.length) return undefined;
+  return fields[idx];
+}
+
+function validateAndBuildRecord(fields: string[], rowIndex: number, mapping: Record<string, number>): { record?: ParsedRecordRow; errors?: string[] } {
   const errors: string[] = [];
 
-  if (fields.length < CSV_FIXED_COLUMNS.length) {
-    errors.push(`字段数量不足：期望 ${CSV_FIXED_COLUMNS.length} 列，实际 ${fields.length} 列`);
-  }
-
-  const [
-    patientNo,
-    patientName,
-    category,
-    type,
-    ageGroup,
-    examDate,
-    rightSphere,
-    rightCylinder,
-    rightAxis,
-    leftSphere,
-    leftCylinder,
-    leftAxis,
-    pd,
-    recommendation
-  ] = fields;
+  const patientNo = getField(fields, mapping, "patientNo");
+  const patientName = getField(fields, mapping, "patientName");
+  const category = getField(fields, mapping, "category");
+  const type = getField(fields, mapping, "type");
+  const ageGroup = getField(fields, mapping, "ageGroup");
+  const examDate = getField(fields, mapping, "examDate");
+  const rightSphere = getField(fields, mapping, "rightSphere");
+  const rightCylinder = getField(fields, mapping, "rightCylinder");
+  const rightAxis = getField(fields, mapping, "rightAxis");
+  const leftSphere = getField(fields, mapping, "leftSphere");
+  const leftCylinder = getField(fields, mapping, "leftCylinder");
+  const leftAxis = getField(fields, mapping, "leftAxis");
+  const pd = getField(fields, mapping, "pd");
+  const recommendation = getField(fields, mapping, "recommendation");
 
   if (!patientNo?.trim()) errors.push("患者编号不能为空");
   if (!patientName?.trim()) errors.push("患者姓名不能为空");
@@ -1100,23 +1153,56 @@ function parseCsvText(csvText: string): CsvParseResult {
   const errorRows: ParseErrorRow[] = [];
 
   if (lines.length === 0) {
-    return { validRows: [], errorRows: [] };
+    return { validRows: [], errorRows: [], missingRequired: CSV_REQUIRED_LABELS, extraColumns: [], headerMapping: {} };
   }
 
-  let startIndex = 0;
   const firstLineFields = parseCsvLine(lines[0]);
   const looksLikeHeader = firstLineFields.some(f =>
-    ["患者编号", "patientNo", "编号", "姓名"].includes(f.trim())
+    matchHeaderToField(f.trim()) !== null
   );
-  if (looksLikeHeader) {
-    startIndex = 1;
+
+  if (!looksLikeHeader) {
+    const fallbackMapping: Record<string, number> = {};
+    CSV_FIELD_MAPPINGS.forEach((field, idx) => {
+      fallbackMapping[field.key] = idx;
+    });
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const rowIndex = i + 1;
+      const fields = parseCsvLine(line);
+      const result = validateAndBuildRecord(fields, rowIndex, fallbackMapping);
+
+      if (result.errors && result.errors.length > 0) {
+        errorRows.push({
+          rowIndex,
+          rowText: line,
+          errors: result.errors
+        });
+      } else if (result.record) {
+        validRows.push(result.record);
+      }
+    }
+    return { validRows, errorRows, missingRequired: [], extraColumns: [], headerMapping: fallbackMapping };
   }
 
-  for (let i = startIndex; i < lines.length; i++) {
+  const headerFields = firstLineFields;
+  const { mapping, missingRequired, extraColumns } = buildHeaderMapping(headerFields);
+
+  for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
-    const rowIndex = i - startIndex + 1;
+    const rowIndex = i;
     const fields = parseCsvLine(line);
-    const result = validateAndBuildRecord(fields, rowIndex);
+
+    if (missingRequired.length > 0) {
+      errorRows.push({
+        rowIndex,
+        rowText: line,
+        errors: [`缺少必需列：${missingRequired.join("、")}，无法解析此行`]
+      });
+      continue;
+    }
+
+    const result = validateAndBuildRecord(fields, rowIndex, mapping);
 
     if (result.errors && result.errors.length > 0) {
       errorRows.push({
@@ -1129,7 +1215,7 @@ function parseCsvText(csvText: string): CsvParseResult {
     }
   }
 
-  return { validRows, errorRows };
+  return { validRows, errorRows, missingRequired, extraColumns, headerMapping: mapping };
 }
 
 const SPHERE_CHANGE_THRESHOLD = 0.25;
@@ -2294,6 +2380,7 @@ function ImportPreview({
 
   const handleConfirm = () => {
     if (!parseResult || parseResult.validRows.length === 0) return;
+    if (parseResult.missingRequired.length > 0) return;
     const records = parseResult.validRows.map(row => row.record);
     onConfirm(records);
     setCsvText("");
@@ -2301,11 +2388,13 @@ function ImportPreview({
     setHasParsed(false);
   };
 
+  const canConfirm = parseResult && parseResult.validRows.length > 0 && parseResult.missingRequired.length === 0;
+
+  const sampleHeaders = CSV_FIELD_MAPPINGS.map(f => f.label);
   const sampleCsv = [
-    CSV_FIXED_COLUMNS.join(","),
-    "Patient-201,王小明,儿童近视,复查,儿童,2026-06-10,-2.50,-0.50,180,-2.25,-0.50,175,58,视力稳定，继续保持",
-    "Patient-202,李小红,成人近视,初配,成人,2026-06-12,-3.00,-0.75,90,-2.75,-0.50,85,62,初次配镜",
-    "Patient-203,张大爷,渐进片,初配,中老年,2026-06-08,+0.50,-0.75,90,+0.75,-1.00,85,63,ADD +1.50"
+    sampleHeaders.join(","),
+    "Patient-201,王小明,儿童近视,2026-06-10,-2.50,-0.50,180,-2.25,-0.50,175,复查,儿童,58,视力稳定，继续保持",
+    "Patient-202,李小红,成人近视,2026-06-12,-3.00,-0.75,90,-2.75,-0.50,85,初配,成人,62,初次配镜"
   ].join("\n");
 
   return (
@@ -2313,11 +2402,11 @@ function ImportPreview({
       <div className="import-section">
         <div className="form-section-title">粘贴CSV数据</div>
         <p className="import-hint">
-          固定字段顺序：{CSV_FIXED_COLUMNS.join(" → ")}
+          自动识别表头，支持多种列名：{sampleHeaders.join("、")}
         </p>
         <textarea
           className="import-textarea"
-          placeholder={`请粘贴CSV格式的验光记录，每行一条记录。\n示例格式：\n${sampleCsv}`}
+          placeholder={`请粘贴带表头的CSV数据，系统将自动匹配列名。\n支持的表头别名：患者编号/编号/patientNo、姓名、分类、检查日期、右眼球镜/R球镜 等\n\n示例：\n${sampleCsv}`}
           value={csvText}
           onChange={e => setCsvText(e.target.value)}
           rows={8}
@@ -2338,6 +2427,39 @@ function ImportPreview({
 
       {hasParsed && parseResult && (
         <div className="parse-results">
+          {parseResult.missingRequired.length > 0 && (
+            <div className="parse-error-section">
+              <div className="parse-result-header error">
+                <span>✕ 缺少必需列</span>
+              </div>
+              <div className="missing-columns-warning">
+                <p>以下必需列未在表头中找到，无法确认导入：</p>
+                <ul>
+                  {parseResult.missingRequired.map((col, i) => (
+                    <li key={i}>{col}</li>
+                  ))}
+                </ul>
+                <p className="hint-text">请在CSV数据首行添加对应的列名后重试。</p>
+              </div>
+            </div>
+          )}
+
+          {parseResult.extraColumns.length > 0 && (
+            <div className="parse-warning-section">
+              <div className="parse-result-header warning">
+                <span>⚠ 额外列（将被忽略）</span>
+              </div>
+              <div className="extra-columns-info">
+                <p>以下列未被识别，导入时将被忽略：</p>
+                <ul>
+                  {parseResult.extraColumns.map((col, i) => (
+                    <li key={i}>{col}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
           {parseResult.validRows.length > 0 && (
             <div className="parse-success-section">
               <div className="parse-result-header success">
@@ -2416,9 +2538,9 @@ function ImportPreview({
             </div>
           )}
 
-          {parseResult.validRows.length > 0 && (
-            <div className="import-confirm-actions">
-              <button type="button" className="ghost-btn" onClick={onCancel}>取消</button>
+          <div className="import-confirm-actions">
+            <button type="button" className="ghost-btn" onClick={onCancel}>取消</button>
+            {canConfirm && (
               <button
                 type="button"
                 className="primary-action"
@@ -2426,8 +2548,8 @@ function ImportPreview({
               >
                 确认导入 {parseResult.validRows.length} 条记录
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </div>
