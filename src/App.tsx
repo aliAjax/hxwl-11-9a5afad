@@ -724,6 +724,13 @@ const refractionRecords: RefractionRecord[] = [
 
 type ComparisonCategory = "myopia-progress" | "astigmatism-change" | "stable";
 
+type ComparisonBaselineType = "latest-two" | "first-to-current" | "custom";
+
+interface ComparisonBaselineConfig {
+  type: ComparisonBaselineType;
+  customRecordIds?: [string, string];
+}
+
 interface EyeComparison {
   sphere: { prev: string; curr: string; diff: number; changed: boolean };
   cylinder: { prev: string; curr: string; diff: number; changed: boolean };
@@ -1331,6 +1338,76 @@ function getAllComparisons(records: RefractionRecord[]): PrescriptionComparisonR
   return results.sort((a, b) =>
     parseLocalDate(b.currRecord.examDate).getTime() - parseLocalDate(a.currRecord.examDate).getTime()
   );
+}
+
+function getLatestTwoComparisons(records: RefractionRecord[]): PrescriptionComparisonResult[] {
+  const patientNos = [...new Set(records.map(r => r.patientNo))];
+  const results: PrescriptionComparisonResult[] = [];
+
+  for (const patientNo of patientNos) {
+    const patientRecords = getPatientRecords(records, patientNo);
+    if (patientRecords.length >= 2) {
+      const lastTwo = patientRecords.slice(-2);
+      results.push(comparePrescriptions(lastTwo[0], lastTwo[1]));
+    }
+  }
+
+  return results.sort((a, b) =>
+    parseLocalDate(b.currRecord.examDate).getTime() - parseLocalDate(a.currRecord.examDate).getTime()
+  );
+}
+
+function getFirstToCurrentComparisons(records: RefractionRecord[]): PrescriptionComparisonResult[] {
+  const patientNos = [...new Set(records.map(r => r.patientNo))];
+  const results: PrescriptionComparisonResult[] = [];
+
+  for (const patientNo of patientNos) {
+    const patientRecords = getPatientRecords(records, patientNo);
+    if (patientRecords.length >= 2) {
+      results.push(comparePrescriptions(patientRecords[0], patientRecords[patientRecords.length - 1]));
+    }
+  }
+
+  return results.sort((a, b) =>
+    parseLocalDate(b.currRecord.examDate).getTime() - parseLocalDate(a.currRecord.examDate).getTime()
+  );
+}
+
+function getCustomComparison(records: RefractionRecord[], recordIds: [string, string]): PrescriptionComparisonResult | null {
+  const record1 = records.find(r => r.id === recordIds[0]);
+  const record2 = records.find(r => r.id === recordIds[1]);
+  if (!record1 || !record2) return null;
+  if (record1.id === record2.id) return null;
+  if (record1.patientNo !== record2.patientNo) return null;
+
+  const date1 = parseLocalDate(record1.examDate).getTime();
+  const date2 = parseLocalDate(record2.examDate).getTime();
+
+  if (date1 <= date2) {
+    return comparePrescriptions(record1, record2);
+  } else {
+    return comparePrescriptions(record2, record1);
+  }
+}
+
+function getComparisonsByBaseline(
+  records: RefractionRecord[],
+  baseline: ComparisonBaselineConfig
+): PrescriptionComparisonResult[] {
+  switch (baseline.type) {
+    case "latest-two":
+      return getLatestTwoComparisons(records);
+    case "first-to-current":
+      return getFirstToCurrentComparisons(records);
+    case "custom":
+      if (baseline.customRecordIds && baseline.customRecordIds[0] && baseline.customRecordIds[1]) {
+        const result = getCustomComparison(records, baseline.customRecordIds);
+        return result ? [result] : [];
+      }
+      return [];
+    default:
+      return getLatestTwoComparisons(records);
+  }
 }
 
 function getVisibleRecordSummary(record: RefractionRecord, canViewDetailedRecords: boolean): string {
@@ -4046,6 +4123,10 @@ function App() {
   const [comparisonDrawerOpen, setComparisonDrawerOpen] = useState(false);
   const [selectedComparison, setSelectedComparison] = useState<PrescriptionComparisonResult | null>(null);
   const [comparisonFilter, setComparisonFilter] = useState<ComparisonCategory | "all">("all");
+  const [comparisonBaseline, setComparisonBaseline] = useState<ComparisonBaselineConfig>({ type: "latest-two" });
+  const [showBaselineSelector, setShowBaselineSelector] = useState(false);
+  const [customSelectStep, setCustomSelectStep] = useState<0 | 1>(0);
+  const [customSelectPatientNo, setCustomSelectPatientNo] = useState<string | null>(null);
   const [showLensRecommendation, setShowLensRecommendation] = useState(false);
   const [lensRecommendationResult, setLensRecommendationResult] = useState<LensRecommendationResult | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -4628,6 +4709,72 @@ function App() {
     setComparisonDrawerOpen(false);
   };
 
+  const handleBaselineChange = (type: ComparisonBaselineType) => {
+    setComparisonBaseline({ type });
+    if (type !== "custom") {
+      setCustomSelectStep(0);
+      setCustomSelectPatientNo(null);
+    }
+  };
+
+  const handleSelectPatientForCustom = (patientNo: string) => {
+    setCustomSelectPatientNo(patientNo);
+    setCustomSelectStep(1);
+  };
+
+  const handleSelectRecordForCustom = (recordId: string) => {
+    const currentIds = comparisonBaseline.customRecordIds || ["", ""];
+    const [firstId, secondId] = currentIds;
+
+    if (!firstId) {
+      setComparisonBaseline({
+        type: "custom",
+        customRecordIds: [recordId, ""],
+      });
+    } else if (!secondId) {
+      setComparisonBaseline({
+        type: "custom",
+        customRecordIds: [firstId, recordId],
+      });
+    } else {
+      setComparisonBaseline({
+        type: "custom",
+        customRecordIds: [recordId, ""],
+      });
+    }
+  };
+
+  const resetCustomSelection = () => {
+    setComparisonBaseline({ type: "custom", customRecordIds: ["", ""] });
+    setCustomSelectStep(0);
+    setCustomSelectPatientNo(null);
+  };
+
+  const goBackToPatientSelect = () => {
+    setCustomSelectStep(0);
+    setCustomSelectPatientNo(null);
+    setComparisonBaseline({ type: "custom", customRecordIds: ["", ""] });
+  };
+
+  const baselineLabelMap: Record<ComparisonBaselineType, string> = {
+    "latest-two": "最近两次",
+    "first-to-current": "首次对当前",
+    "custom": "指定两次记录",
+  };
+
+  const patientsWithMultipleRecords = useMemo(() => {
+    const patientRecordCount: Record<string, number> = {};
+    records.forEach(r => {
+      patientRecordCount[r.patientNo] = (patientRecordCount[r.patientNo] || 0) + 1;
+    });
+    return patients.filter(p => (patientRecordCount[p.patientNo] || 0) >= 2);
+  }, [patients, records]);
+
+  const customSelectPatientRecords = useMemo(() => {
+    if (!customSelectPatientNo) return [];
+    return getPatientRecords(records, customSelectPatientNo);
+  }, [records, customSelectPatientNo]);
+
   const filteredPatientNos = useMemo(() => {
     let result = patients;
     if (ageGroupFilter) {
@@ -4665,7 +4812,7 @@ function App() {
     normal: normal.length,
   };
 
-  const comparisons = useMemo(() => getAllComparisons(records), [records]);
+  const comparisons = useMemo(() => getComparisonsByBaseline(records, comparisonBaseline), [records, comparisonBaseline]);
 
   const { myopiaProgress, astigmatismChange, stable } = useMemo(() => {
     return {
@@ -5315,6 +5462,108 @@ function App() {
             </button>
           </div>
         </div>
+
+        <div className="baseline-selector">
+          <span className="baseline-selector-label">对比基准:</span>
+          <div className="baseline-tabs">
+            <button
+              className={comparisonBaseline.type === "latest-two" ? "baseline-active" : ""}
+              onClick={() => handleBaselineChange("latest-two")}
+            >
+              最近两次
+            </button>
+            <button
+              className={comparisonBaseline.type === "first-to-current" ? "baseline-active" : ""}
+              onClick={() => handleBaselineChange("first-to-current")}
+            >
+              首次对当前
+            </button>
+            <button
+              className={comparisonBaseline.type === "custom" ? "baseline-active" : ""}
+              onClick={() => handleBaselineChange("custom")}
+            >
+              指定两次记录
+            </button>
+          </div>
+          <span className="baseline-info-badge">
+            {baselineLabelMap[comparisonBaseline.type]}
+          </span>
+        </div>
+
+        {comparisonBaseline.type === "custom" && (
+          <div className="record-select-panel">
+            <h4>选择记录进行对比</h4>
+            <div className="record-select-steps">
+              <span className={`step-badge ${customSelectStep === 0 ? "active" : customSelectStep > 0 ? "done" : ""}`}>
+                1. 选择患者
+              </span>
+              <span className={`step-badge ${customSelectStep === 1 ? "active" : customSelectStep > 1 ? "done" : ""}`}>
+                2. 选择两条记录
+              </span>
+            </div>
+
+            {customSelectStep === 0 && (
+              <>
+                <p style={{ fontSize: "12px", color: "#64748b", marginBottom: "8px" }}>
+                  请选择有两条以上记录的患者:
+                </p>
+                <div className="patient-select-list">
+                  {patientsWithMultipleRecords.length > 0 ? (
+                    patientsWithMultipleRecords.map(patient => (
+                      <div
+                        key={patient.id}
+                        className={`patient-item ${customSelectPatientNo === patient.patientNo ? "selected" : ""}`}
+                        onClick={() => handleSelectPatientForCustom(patient.patientNo)}
+                      >
+                        {patient.patientNo} · {patient.patientName}
+                        <span style={{ float: "right", color: "#94a3b8", fontSize: "12px" }}>
+                          {getPatientRecords(records, patient.patientNo).length} 条记录
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="patient-item disabled" style={{ cursor: "default" }}>
+                      暂无有多条记录的患者
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {customSelectStep === 1 && (
+              <>
+                <p style={{ fontSize: "12px", color: "#64748b", marginBottom: "8px" }}>
+                  请选择两条记录进行对比 (已选 {comparisonBaseline.customRecordIds?.filter(id => id).length || 0}/2):
+                </p>
+                <div className="record-select-list">
+                  {customSelectPatientRecords.map(record => {
+                    const isSelected = comparisonBaseline.customRecordIds?.includes(record.id);
+                    return (
+                      <div
+                        key={record.id}
+                        className={`record-item ${isSelected ? "selected" : ""}`}
+                        onClick={() => handleSelectRecordForCustom(record.id)}
+                      >
+                        {record.examDate} · {record.type || "常规检查"}
+                        {isSelected && <span style={{ float: "right" }}>✓</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="record-select-actions">
+                  <button onClick={goBackToPatientSelect}>返回选择患者</button>
+                  <button onClick={resetCustomSelection}>重置选择</button>
+                </div>
+                {comparisonBaseline.customRecordIds?.[0] && comparisonBaseline.customRecordIds?.[1] && (
+                  <p style={{ fontSize: "12px", color: "#10b981", marginTop: "8px", textAlign: "center" }}>
+                    ✓ 已选择两条记录，对比结果已自动生成
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         <div className="comparison-list">
           {filteredComparisons.length > 0 ? (
             filteredComparisons.slice(0, 4).map((comparison, index) => (
@@ -5329,7 +5578,11 @@ function App() {
           ) : (
             <div className="empty-state">
               <p>暂无对比数据</p>
-              <p className="empty-hint">同一患者需至少两条验光记录才能进行对比</p>
+              <p className="empty-hint">
+                {comparisonBaseline.type === "custom"
+                  ? "请先选择患者和两条记录进行对比"
+                  : "同一患者需至少两条验光记录才能进行对比"}
+              </p>
             </div>
           )}
           {filteredComparisons.length > 4 && (
@@ -5844,6 +6097,107 @@ function App() {
         </div>
       </div>
 
+      <div className="baseline-selector">
+        <span className="baseline-selector-label">对比基准:</span>
+        <div className="baseline-tabs">
+          <button
+            className={comparisonBaseline.type === "latest-two" ? "baseline-active" : ""}
+            onClick={() => handleBaselineChange("latest-two")}
+          >
+            最近两次
+          </button>
+          <button
+            className={comparisonBaseline.type === "first-to-current" ? "baseline-active" : ""}
+            onClick={() => handleBaselineChange("first-to-current")}
+          >
+            首次对当前
+          </button>
+          <button
+            className={comparisonBaseline.type === "custom" ? "baseline-active" : ""}
+            onClick={() => handleBaselineChange("custom")}
+          >
+            指定两次记录
+          </button>
+        </div>
+        <span className="baseline-info-badge">
+          {baselineLabelMap[comparisonBaseline.type]}
+        </span>
+      </div>
+
+      {comparisonBaseline.type === "custom" && (
+        <div className="record-select-panel">
+          <h4>选择记录进行对比</h4>
+          <div className="record-select-steps">
+            <span className={`step-badge ${customSelectStep === 0 ? "active" : customSelectStep > 0 ? "done" : ""}`}>
+              1. 选择患者
+            </span>
+            <span className={`step-badge ${customSelectStep === 1 ? "active" : customSelectStep > 1 ? "done" : ""}`}>
+              2. 选择两条记录
+            </span>
+          </div>
+
+          {customSelectStep === 0 && (
+            <>
+              <p style={{ fontSize: "12px", color: "#64748b", marginBottom: "8px" }}>
+                请选择有两条以上记录的患者:
+              </p>
+              <div className="patient-select-list">
+                {patientsWithMultipleRecords.length > 0 ? (
+                  patientsWithMultipleRecords.map(patient => (
+                    <div
+                      key={patient.id}
+                      className={`patient-item ${customSelectPatientNo === patient.patientNo ? "selected" : ""}`}
+                      onClick={() => handleSelectPatientForCustom(patient.patientNo)}
+                    >
+                      {patient.patientNo} · {patient.patientName}
+                      <span style={{ float: "right", color: "#94a3b8", fontSize: "12px" }}>
+                        {getPatientRecords(records, patient.patientNo).length} 条记录
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="patient-item disabled" style={{ cursor: "default" }}>
+                    暂无有多条记录的患者
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {customSelectStep === 1 && (
+            <>
+              <p style={{ fontSize: "12px", color: "#64748b", marginBottom: "8px" }}>
+                请选择两条记录进行对比 (已选 {comparisonBaseline.customRecordIds?.filter(id => id).length || 0}/2):
+              </p>
+              <div className="record-select-list">
+                {customSelectPatientRecords.map(record => {
+                  const isSelected = comparisonBaseline.customRecordIds?.includes(record.id);
+                  return (
+                    <div
+                      key={record.id}
+                      className={`record-item ${isSelected ? "selected" : ""}`}
+                      onClick={() => handleSelectRecordForCustom(record.id)}
+                    >
+                      {record.examDate} · {record.type || "常规检查"}
+                      {isSelected && <span style={{ float: "right" }}>✓</span>}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="record-select-actions">
+                <button onClick={goBackToPatientSelect}>返回选择患者</button>
+                <button onClick={resetCustomSelection}>重置选择</button>
+              </div>
+              {comparisonBaseline.customRecordIds?.[0] && comparisonBaseline.customRecordIds?.[1] && (
+                <p style={{ fontSize: "12px", color: "#10b981", marginTop: "8px", textAlign: "center" }}>
+                  ✓ 已选择两条记录，对比结果已自动生成
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {selectedPatientNo && (
         <div className="workflow-patient-info">
           <h3 className="workflow-section-title">
@@ -5874,9 +6228,11 @@ function App() {
           <div className="empty-state">
             <p>暂无对比数据</p>
             <p className="empty-hint">
-              {selectedPatientNo
-                ? "该患者需至少两条验光记录才能进行对比"
-                : "系统中需至少有同一患者的两条验光记录"}
+              {comparisonBaseline.type === "custom"
+                ? "请先选择患者和两条记录进行对比"
+                : selectedPatientNo
+                  ? "该患者需至少两条验光记录才能进行对比"
+                  : "系统中需至少有同一患者的两条验光记录"}
             </p>
           </div>
         )}

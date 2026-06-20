@@ -1558,6 +1558,183 @@ input {
   border-color: var(--accent);
 }
 
+.baseline-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.baseline-selector-label {
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.baseline-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.baseline-tabs button {
+  min-height: 30px;
+  padding: 5px 12px;
+  font-size: 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  color: #475569;
+  transition: all 0.15s;
+  cursor: pointer;
+}
+
+.baseline-tabs button:hover {
+  background: #e2e8f0;
+}
+
+.baseline-tabs button.baseline-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+
+.baseline-custom-hint {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+}
+
+.record-select-panel {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.record-select-panel h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 8px;
+}
+
+.record-select-steps {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.record-select-steps .step-badge {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #64748b;
+}
+
+.record-select-steps .step-badge.active {
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.record-select-steps .step-badge.done {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.patient-select-list,
+.record-select-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.patient-item,
+.record-item {
+  padding: 8px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.1s;
+}
+
+.patient-item:hover,
+.record-item:hover {
+  background: #f0f9ff;
+}
+
+.patient-item:last-child,
+.record-item:last-child {
+  border-bottom: none;
+}
+
+.patient-item.selected,
+.record-item.selected {
+  background: #eff6ff;
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.patient-item.disabled,
+.record-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.record-select-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+
+.record-select-actions button {
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: #475569;
+  transition: all 0.15s;
+}
+
+.record-select-actions button:hover {
+  background: #f1f5f9;
+}
+
+.record-select-actions button.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+
+.record-select-actions button.primary:hover {
+  opacity: 0.9;
+}
+
+.baseline-info-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: var(--primary);
+  font-weight: 500;
+}
+
 .comparison-list {
   display: grid;
   gap: 12px;
