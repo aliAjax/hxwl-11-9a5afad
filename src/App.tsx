@@ -4400,13 +4400,17 @@ function App() {
 
   useEffect(() => {
     if (showForm) {
-      patientFormSubmitRef.current = handleAddRef.current;
+      patientFormSubmitRef.current = (data) => {
+        if (handleAddRef.current) handleAddRef.current(data);
+      };
       patientFormDataRef.current = emptyForm;
       setPatientFormDirty(false);
     } else if (editingId) {
       const target = patients.find(p => p.id === editingId);
       if (target) {
-        patientFormSubmitRef.current = handleEditRef.current;
+        patientFormSubmitRef.current = (data) => {
+          if (handleEditRef.current) handleEditRef.current(data);
+        };
         patientFormDataRef.current = {
           patientNo: target.patientNo,
           ageGroup: target.ageGroup,
