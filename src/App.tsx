@@ -5601,8 +5601,8 @@ function App() {
         )}
 
         <div className="comparison-list">
-          {displayComparisons.length > 0 ? (
-            displayComparisons.slice(0, 4).map((comparison, index) => (
+          {filteredComparisons.length > 0 ? (
+            filteredComparisons.slice(0, 4).map((comparison, index) => (
               <ComparisonCard
                 key={`${comparison.prevRecord.id}-${comparison.currRecord.id}`}
                 comparison={comparison}
@@ -5621,13 +5621,13 @@ function App() {
               </p>
             </div>
           )}
-          {displayComparisons.length > 4 && (
+          {filteredComparisons.length > 4 && (
             <div style={{ textAlign: "center", marginTop: "12px" }}>
               <button
                 className="ghost-btn"
                 onClick={() => switchStep("recheck-compare")}
               >
-                查看全部 {displayComparisons.length} 条对比 →
+                查看全部 {filteredComparisons.length} 条对比 →
               </button>
             </div>
           )}
