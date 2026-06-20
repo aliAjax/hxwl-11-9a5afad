@@ -1748,17 +1748,37 @@ function PatientForm({
   initialData,
   onSubmit,
   onCancel,
-  readOnly = false
+  readOnly = false,
+  onDirtyChange
 }: {
   initialData?: Omit<PatientProfile, "id">;
   onSubmit: (data: Omit<PatientProfile, "id">) => void;
   onCancel: () => void;
   readOnly?: boolean;
+  onDirtyChange?: (dirty: boolean, data: Omit<PatientProfile, "id">) => void;
 }) {
   const [formData, setFormData] = useState<Omit<PatientProfile, "id">>(initialData || emptyForm);
+  const baseDataRef = useRef<Omit<PatientProfile, "id">>(initialData || emptyForm);
+  const [dirty, setDirty] = useState(false);
+
+  const computeDirty = useCallback((data: Omit<PatientProfile, "id">, base: Omit<PatientProfile, "id">) => {
+    return (
+      data.patientNo !== base.patientNo ||
+      data.ageGroup !== base.ageGroup ||
+      data.lensType !== base.lensType ||
+      data.lastCheckDate !== base.lastCheckDate ||
+      data.remark !== base.remark
+    );
+  }, []);
 
   const handleChange = (field: keyof Omit<PatientProfile, "id">, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData(prev => {
+      const next = { ...prev, [field]: value };
+      const isDirty = computeDirty(next, baseDataRef.current);
+      setDirty(isDirty);
+      if (onDirtyChange) onDirtyChange(isDirty, next);
+      return next;
+    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -1766,6 +1786,8 @@ function PatientForm({
     if (readOnly) return;
     if (!formData.patientNo.trim()) return;
     onSubmit(formData);
+    setDirty(false);
+    if (onDirtyChange) onDirtyChange(false, emptyForm);
     setFormData(emptyForm);
   };
 
@@ -1833,7 +1855,11 @@ function PatientForm({
       </label>
       {!readOnly && (
         <div className="form-actions">
-          <button type="button" className="ghost-btn" onClick={onCancel}>取消</button>
+          <button type="button" className="ghost-btn" onClick={() => {
+            setDirty(false);
+            if (onDirtyChange) onDirtyChange(false, emptyForm);
+            onCancel();
+          }}>取消</button>
           <button type="submit" className="primary-action">
             {initialData ? "保存修改" : "新增档案"}
           </button>
@@ -1896,7 +1922,8 @@ function PrescriptionForm({
   draftData,
   draftSavedAt,
   onDraftChange,
-  onDraftDiscard
+  onDraftDiscard,
+  onDirtyChange
 }: {
   onSubmit: (record: Omit<RefractionRecord, "id" | "summary"> & { summary: string }) => void;
   onCancel: () => void;
@@ -1906,6 +1933,7 @@ function PrescriptionForm({
   draftSavedAt?: string | null;
   onDraftChange?: (data: PrescriptionFormData) => void;
   onDraftDiscard?: () => void;
+  onDirtyChange?: (dirty: boolean, data: PrescriptionFormData) => void;
 }) {
   const resolveInitialFormData = (): PrescriptionFormData => {
     if (initialData) {
@@ -1952,7 +1980,40 @@ function PrescriptionForm({
   const [formData, setFormData] = useState<PrescriptionFormData>(resolveInitialFormData);
   const [errors, setErrors] = useState<PrescriptionErrors>({});
   const [showDraftBanner, setShowDraftBanner] = useState(!!draftData);
+  const [dirty, setDirty] = useState(false);
+  const baseDataRef = useRef<PrescriptionFormData>(resolveInitialFormData());
   const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const computePrescriptionDirty = useCallback((data: PrescriptionFormData, base: PrescriptionFormData): boolean => {
+    if (data.patientNo !== base.patientNo) return true;
+    if (data.patientName !== base.patientName) return true;
+    if (data.ageGroup !== base.ageGroup) return true;
+    if (data.gender !== base.gender) return true;
+    if (data.examDate !== base.examDate) return true;
+    if (data.category !== base.category) return true;
+    if (data.type !== base.type) return true;
+    if (data.pd !== base.pd) return true;
+    if (data.recommendation !== base.recommendation) return true;
+    const re = data.rightEye, bre = base.rightEye;
+    if (re.nakedVision !== bre.nakedVision || re.correctedVision !== bre.correctedVision ||
+        re.sphere !== bre.sphere || re.cylinder !== bre.cylinder ||
+        re.axis !== bre.axis || re.add !== bre.add) return true;
+    const le = data.leftEye, ble = base.leftEye;
+    if (le.nakedVision !== ble.nakedVision || le.correctedVision !== ble.correctedVision ||
+        le.sphere !== ble.sphere || le.cylinder !== ble.cylinder ||
+        le.axis !== ble.axis || le.add !== ble.add) return true;
+    const rcc = data.cornealCurvature.right, brcc = base.cornealCurvature.right;
+    if (rcc.horizontal !== brcc.horizontal || rcc.vertical !== brcc.vertical) return true;
+    const lcc = data.cornealCurvature.left, blcc = base.cornealCurvature.left;
+    if (lcc.horizontal !== blcc.horizontal || lcc.vertical !== blcc.vertical) return true;
+    return false;
+  }, []);
+
+  const notifyDirty = useCallback((data: PrescriptionFormData) => {
+    const isDirty = computePrescriptionDirty(data, baseDataRef.current);
+    setDirty(isDirty);
+    if (onDirtyChange) onDirtyChange(isDirty, data);
+  }, [computePrescriptionDirty, onDirtyChange]);
 
   const notifyDraftChange = useCallback((data: PrescriptionFormData) => {
     if (!onDraftChange) return;
@@ -1974,6 +2035,7 @@ function PrescriptionForm({
     }
     setFormData(prev => {
       const next = { ...prev, [field]: value };
+      notifyDirty(next);
       notifyDraftChange(next);
       return next;
     });
@@ -1997,6 +2059,7 @@ function PrescriptionForm({
         ...prev,
         [eye]: { ...prev[eye], [field]: cleaned }
       };
+      notifyDirty(next);
       notifyDraftChange(next);
       return next;
     });
@@ -2016,6 +2079,7 @@ function PrescriptionForm({
           [eye]: { ...prev.cornealCurvature[eye], [field]: cleaned }
         }
       };
+      notifyDirty(next);
       notifyDraftChange(next);
       return next;
     });
@@ -2135,6 +2199,8 @@ function PrescriptionForm({
       cornealCurvature: sanitizedCurvature,
       recommendation: formData.recommendation.trim()
     });
+    setDirty(false);
+    if (onDirtyChange) onDirtyChange(false, emptyPrescriptionForm);
     setFormData(emptyPrescriptionForm);
     setErrors({});
   };
@@ -2232,6 +2298,9 @@ function PrescriptionForm({
           <button type="button" className="draft-banner-discard" onClick={() => {
             setShowDraftBanner(false);
             setFormData(emptyPrescriptionForm);
+            baseDataRef.current = emptyPrescriptionForm;
+            setDirty(false);
+            if (onDirtyChange) onDirtyChange(false, emptyPrescriptionForm);
             if (onDraftDiscard) onDraftDiscard();
           }}>
             丢弃草稿
@@ -2424,7 +2493,11 @@ function PrescriptionForm({
 
       {!readOnly && (
         <div className="form-actions">
-          <button type="button" className="ghost-btn" onClick={() => { setFormData(emptyPrescriptionForm); setErrors({}); onCancel(); }}>取消</button>
+          <button type="button" className="ghost-btn" onClick={() => {
+            setDirty(false);
+            if (onDirtyChange) onDirtyChange(false, emptyPrescriptionForm);
+            setFormData(emptyPrescriptionForm); setErrors({}); onCancel();
+          }}>取消</button>
           <button type="submit" className="primary-action">{initialData ? "保存修改" : "生成记录并加入列表"}</button>
         </div>
       )}
@@ -4138,6 +4211,15 @@ function App() {
   const [currentStep, setCurrentStep] = useState<WorkflowStep>(ROLE_CONFIGS["optometrist"].defaultStep);
   const [selectedPatientNo, setSelectedPatientNo] = useState<string | null>(null);
 
+  const [patientFormDirty, setPatientFormDirty] = useState(false);
+  const patientFormDataRef = useRef<Omit<PatientProfile, "id">>(emptyForm);
+  const [prescriptionFormDirty, setPrescriptionFormDirty] = useState(false);
+  const prescriptionFormDataRef = useRef<PrescriptionFormData>(emptyPrescriptionForm);
+  const [showRoleSwitchConfirm, setShowRoleSwitchConfirm] = useState(false);
+  const pendingRoleRef = useRef<UserRole | null>(null);
+  const patientFormSubmitRef = useRef<((data: Omit<PatientProfile, "id">) => void) | null>(null);
+  const prescriptionFormSubmitRef = useRef<((data: Omit<RefractionRecord, "id" | "summary"> & { summary: string }) => void) | null>(null);
+
   const switchStep = useCallback((step: WorkflowStep) => {
     if (showPrescriptionForm && draftSyncRef.current && step !== "initial-exam") {
       const data = draftSyncRef.current;
@@ -4176,7 +4258,30 @@ function App() {
     setReminderStatusFilter("");
   }, []);
 
-  const handleRoleChange = useCallback((role: UserRole) => {
+  const detectUnsavedEditions = useCallback((targetRole: UserRole): {
+    hasPrescriptionUnsaved: boolean;
+    hasPatientUnsaved: boolean;
+    hasConflictOpen: boolean;
+    willLosePrescriptionEdit: boolean;
+    willLosePatientEdit: boolean;
+  } => {
+    const currentPermission = ROLE_PERMISSIONS[currentRole];
+    const targetPermission = ROLE_PERMISSIONS[targetRole];
+    const hasPrescriptionUnsaved = showPrescriptionForm && prescriptionFormDirty;
+    const hasPatientUnsaved = (showForm || !!editingId) && patientFormDirty;
+    const hasConflictOpen = showConflictModal;
+    const willLosePrescriptionEdit = currentPermission.canEditInitialExam && !targetPermission.canEditInitialExam;
+    const willLosePatientEdit = currentPermission.canEditPatientProfile && !targetPermission.canEditPatientProfile;
+    return {
+      hasPrescriptionUnsaved,
+      hasPatientUnsaved,
+      hasConflictOpen,
+      willLosePrescriptionEdit,
+      willLosePatientEdit
+    };
+  }, [currentRole, showPrescriptionForm, prescriptionFormDirty, showForm, editingId, patientFormDirty, showConflictModal]);
+
+  const finalizeRoleSwitch = useCallback((role: UserRole) => {
     if (showPrescriptionForm && draftSyncRef.current && dbSupported && dbReady) {
       const data = draftSyncRef.current;
       const hasContent = data.patientNo.trim() || data.patientName.trim() ||
@@ -4189,9 +4294,111 @@ function App() {
     setCurrentRoleState(role);
     setCurrentStep(ROLE_CONFIGS[role].defaultStep);
     setExportSuccess(null);
+    setShowRoleSwitchConfirm(false);
+    pendingRoleRef.current = null;
   }, [showPrescriptionForm, dbSupported, dbReady]);
 
+  const handleRoleChange = useCallback((role: UserRole) => {
+    if (role === currentRole) return;
+    const info = detectUnsavedEditions(role);
+    const needsConfirm =
+      (info.hasPrescriptionUnsaved && info.willLosePrescriptionEdit) ||
+      (info.hasPatientUnsaved && info.willLosePatientEdit) ||
+      (info.hasConflictOpen && (info.willLosePrescriptionEdit || info.willLosePatientEdit));
+
+    if (!needsConfirm) {
+      finalizeRoleSwitch(role);
+      return;
+    }
+
+    pendingRoleRef.current = role;
+    setShowRoleSwitchConfirm(true);
+  }, [currentRole, detectUnsavedEditions, finalizeRoleSwitch]);
+
   const setCurrentRole = handleRoleChange;
+
+  const handleRoleSwitchSave = useCallback(() => {
+    const info = pendingRoleRef.current ? detectUnsavedEditions(pendingRoleRef.current) : null;
+    if (info?.hasPatientUnsaved && patientFormSubmitRef.current) {
+      const data = patientFormDataRef.current;
+      if (data.patientNo.trim()) {
+        patientFormSubmitRef.current(data);
+      }
+    }
+    if (info?.hasPrescriptionUnsaved) {
+      cancelPrescriptionForm();
+    }
+    if (info?.hasConflictOpen) {
+      setShowConflictModal(false);
+      setConflictEntity(null);
+    }
+    if (pendingRoleRef.current) {
+      finalizeRoleSwitch(pendingRoleRef.current);
+    }
+  }, [detectUnsavedEditions, finalizeRoleSwitch, cancelPrescriptionForm]);
+
+  const handleRoleSwitchDiscard = useCallback(() => {
+    const info = pendingRoleRef.current ? detectUnsavedEditions(pendingRoleRef.current) : null;
+    if (info?.hasPatientUnsaved) {
+      if (showForm) cancelAdd();
+      if (editingId) cancelEdit();
+    }
+    if (info?.hasPrescriptionUnsaved) {
+      handlePrescriptionDraftDiscard();
+      cancelPrescriptionForm();
+    }
+    if (info?.hasConflictOpen) {
+      setShowConflictModal(false);
+      setConflictEntity(null);
+    }
+    if (pendingRoleRef.current) {
+      finalizeRoleSwitch(pendingRoleRef.current);
+    }
+  }, [detectUnsavedEditions, finalizeRoleSwitch, showForm, editingId, handlePrescriptionDraftDiscard, cancelPrescriptionForm, cancelAdd, cancelEdit]);
+
+  const handleRoleSwitchCancel = useCallback(() => {
+    setShowRoleSwitchConfirm(false);
+    pendingRoleRef.current = null;
+  }, []);
+
+  const handlePatientFormDirtyChange = useCallback((dirty: boolean, data: Omit<PatientProfile, "id">) => {
+    setPatientFormDirty(dirty);
+    patientFormDataRef.current = data;
+  }, []);
+
+  const handlePrescriptionFormDirtyChange = useCallback((dirty: boolean, data: PrescriptionFormData) => {
+    setPrescriptionFormDirty(dirty);
+    prescriptionFormDataRef.current = data;
+  }, []);
+
+  useEffect(() => {
+    if (showForm) {
+      patientFormSubmitRef.current = handleAdd;
+      patientFormDataRef.current = emptyForm;
+      setPatientFormDirty(false);
+    } else if (editingId && editingPatient) {
+      patientFormSubmitRef.current = handleEdit;
+      patientFormDataRef.current = {
+        patientNo: editingPatient.patientNo,
+        ageGroup: editingPatient.ageGroup,
+        lensType: editingPatient.lensType,
+        lastCheckDate: editingPatient.lastCheckDate,
+        remark: editingPatient.remark
+      };
+      setPatientFormDirty(false);
+    } else {
+      patientFormSubmitRef.current = null;
+      patientFormDataRef.current = emptyForm;
+      setPatientFormDirty(false);
+    }
+  }, [showForm, editingId, editingPatient, handleAdd, handleEdit]);
+
+  useEffect(() => {
+    if (!showPrescriptionForm) {
+      setPrescriptionFormDirty(false);
+      prescriptionFormDataRef.current = emptyPrescriptionForm;
+    }
+  }, [showPrescriptionForm]);
 
   const workflowSteps: WorkflowStep[] = useMemo(() => {
     const steps: WorkflowStep[] = ["dashboard"];
@@ -5883,6 +6090,7 @@ function App() {
           key="add-form"
           onSubmit={handleAdd}
           onCancel={cancelAdd}
+          onDirtyChange={handlePatientFormDirtyChange}
         />
       )}
 
@@ -5900,6 +6108,7 @@ function App() {
             }}
             onSubmit={handleEdit}
             onCancel={cancelEdit}
+            onDirtyChange={handlePatientFormDirtyChange}
           />
         </div>
       )}
@@ -6017,6 +6226,7 @@ function App() {
           draftSavedAt={prescriptionDraftSavedAt}
           onDraftChange={handlePrescriptionDraftChange}
           onDraftDiscard={handlePrescriptionDraftDiscard}
+          onDirtyChange={handlePrescriptionFormDirtyChange}
         />
       )}
 
@@ -7022,6 +7232,68 @@ function App() {
                   onClick={() => handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, true)}
                 >
                   保留本地版本
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {showRoleSwitchConfirm && pendingRoleRef.current && (() => {
+        const targetRole = pendingRoleRef.current;
+        const info = detectUnsavedEditions(targetRole);
+        const targetRoleLabel = ROLE_LABELS[targetRole];
+        const warnings: string[] = [];
+        if (info.hasPrescriptionUnsaved && info.willLosePrescriptionEdit) {
+          warnings.push("处方录入存在未保存的修改，切换后您将失去处方编辑权限");
+        }
+        if (info.hasPatientUnsaved && info.willLosePatientEdit) {
+          warnings.push("患者档案编辑存在未保存的修改，切换后您将失去患者档案编辑权限");
+        }
+        if (info.hasConflictOpen && (info.willLosePrescriptionEdit || info.willLosePatientEdit)) {
+          warnings.push("同步冲突尚未处理完成，切换后您可能无法继续处理当前冲突");
+        }
+
+        return (
+          <div className="modal-overlay">
+            <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3>⚠️ 未保存变更提醒</h3>
+              </div>
+              <div className="modal-body">
+                <div className="conflict-warning">
+                  <div className="conflict-warning-icon">⚠️</div>
+                  <div className="conflict-warning-text">
+                    <strong>即将切换角色至「{targetRoleLabel}」</strong>
+                    <p>检测到以下问题，请选择如何处理：</p>
+                  </div>
+                </div>
+                <ul style={{ paddingLeft: "20px", lineHeight: "1.8", color: "var(--text-secondary)" }}>
+                  {warnings.map((w, i) => (
+                    <li key={i} style={{ marginBottom: "6px" }}>{w}</li>
+                  ))}
+                </ul>
+                <p style={{ marginTop: "16px", color: "var(--text-secondary)", fontSize: "13px" }}>
+                  选择「保存并切换」将尝试保存当前编辑内容后切换；
+                  选择「放弃变更」将丢弃所有未保存修改；
+                  选择「取消」将停留在当前角色。
+                </p>
+              </div>
+              <div className="modal-actions">
+                <button className="ghost-btn" onClick={handleRoleSwitchCancel}>
+                  取消
+                </button>
+                <button
+                  className="secondary-btn"
+                  onClick={handleRoleSwitchDiscard}
+                >
+                  放弃变更并切换
+                </button>
+                <button
+                  className="primary-action"
+                  onClick={handleRoleSwitchSave}
+                >
+                  保存并切换
                 </button>
               </div>
             </div>
