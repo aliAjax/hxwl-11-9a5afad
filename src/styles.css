@@ -204,6 +204,88 @@ label span {
   background: #ffffff;
 }
 
+.chips button.chip-active,
+.chips.muted button.chip-active {
+  background: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: color-mix(in srgb, var(--primary) 4%, #f8f9fb);
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 12%, #e2e8f0);
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filter-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--primary) 70%, #475569);
+  white-space: nowrap;
+  min-width: 56px;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.filter-chip {
+  min-height: 30px;
+  border-radius: 999px;
+  padding: 4px 12px;
+  border: 1px solid color-mix(in srgb, var(--primary) 20%, #d1d5db);
+  background: #ffffff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: #374151;
+}
+
+.filter-chip:hover {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 6%, #ffffff);
+}
+
+.filter-chip-active {
+  background: var(--primary) !important;
+  color: #ffffff !important;
+  border-color: var(--primary) !important;
+}
+
+.filter-clear-btn {
+  min-height: 30px;
+  border-radius: 999px;
+  padding: 4px 14px;
+  border: 1px solid #ef4444;
+  background: #fff;
+  color: #ef4444;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-left: auto;
+  align-self: center;
+}
+
+.filter-clear-btn:hover {
+  background: #ef4444;
+  color: #ffffff;
+}
+
 .section-heading {
   display: flex;
   justify-content: space-between;
@@ -1284,6 +1366,20 @@ input {
   .eyes-row,
   .eye-fields-grid {
     grid-template-columns: 1fr;
+  }
+
+  .filter-bar {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .filter-group {
+    width: 100%;
+  }
+
+  .filter-clear-btn {
+    margin-left: 0;
+    width: 100%;
   }
 
   .field-grid {

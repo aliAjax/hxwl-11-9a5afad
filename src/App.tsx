@@ -3577,6 +3577,9 @@ function App() {
   const [currentStep, setCurrentStep] = useState<WorkflowStep>(ROLE_CONFIGS["optometrist"].defaultStep);
   const [selectedPatientNo, setSelectedPatientNo] = useState<string | null>(null);
   const [patientFilter, setPatientFilter] = useState<string>("");
+  const [ageGroupFilter, setAgeGroupFilter] = useState<string>("");
+  const [lensTypeFilter, setLensTypeFilter] = useState<string>("");
+  const [reminderStatusFilter, setReminderStatusFilter] = useState<string>("");
   const [exportSuccess, setExportSuccess] = useState<string | null>(null);
 
   const [syncConfig, setSyncConfig] = useState<SyncConfig>(DEFAULT_SYNC_CONFIG);
@@ -3590,6 +3593,14 @@ function App() {
 
   const permission = ROLE_PERMISSIONS[currentRole];
   const roleConfig = ROLE_CONFIGS[currentRole];
+
+  const hasActiveFilters = ageGroupFilter || lensTypeFilter || reminderStatusFilter;
+
+  const clearAllFilters = useCallback(() => {
+    setAgeGroupFilter("");
+    setLensTypeFilter("");
+    setReminderStatusFilter("");
+  }, []);
 
   const handleRoleChange = useCallback((role: UserRole) => {
     setCurrentRoleState(role);
@@ -3753,6 +3764,15 @@ function App() {
           if (persistedData.filters.comparisonFilter) {
             setComparisonFilter(persistedData.filters.comparisonFilter as ComparisonCategory | "all");
           }
+          if (persistedData.filters.ageGroupFilter) {
+            setAgeGroupFilter(persistedData.filters.ageGroupFilter);
+          }
+          if (persistedData.filters.lensTypeFilter) {
+            setLensTypeFilter(persistedData.filters.lensTypeFilter);
+          }
+          if (persistedData.filters.reminderStatusFilter) {
+            setReminderStatusFilter(persistedData.filters.reminderStatusFilter);
+          }
           if (persistedData.reminders.length > 0) {
             const cycleMap: Record<string, number> = {};
             persistedData.reminders.forEach(r => {
@@ -3800,11 +3820,11 @@ function App() {
       scheduleSave({
         patients,
         records,
-        filters: { comparisonFilter },
+        filters: { comparisonFilter, ageGroupFilter, lensTypeFilter, reminderStatusFilter },
         reminders: reminderData,
       });
     }
-  }, [patients, records, comparisonFilter, reminders, customCycles, isLoading, scheduleSave, dbSupported, dbReady]);
+  }, [patients, records, comparisonFilter, ageGroupFilter, lensTypeFilter, reminderStatusFilter, reminders, customCycles, isLoading, scheduleSave, dbSupported, dbReady]);
 
   const handleClearData = async () => {
     try {
@@ -3813,6 +3833,9 @@ function App() {
       setPatients([]);
       setRecords([]);
       setComparisonFilter("all");
+      setAgeGroupFilter("");
+      setLensTypeFilter("");
+      setReminderStatusFilter("");
       setShowClearConfirm(false);
       setShowForm(false);
       setEditingId(null);
@@ -4070,13 +4093,36 @@ function App() {
     setComparisonDrawerOpen(false);
   };
 
+  const filteredPatientNos = useMemo(() => {
+    let result = patients;
+    if (ageGroupFilter) {
+      result = result.filter(p => p.ageGroup === ageGroupFilter);
+    }
+    if (lensTypeFilter) {
+      result = result.filter(p => p.lensType === lensTypeFilter);
+    }
+    if (reminderStatusFilter) {
+      const statusPatientNos = new Set(
+        reminders
+          .filter(r => r.reminderStatus === reminderStatusFilter)
+          .map(r => r.patientNo)
+      );
+      result = result.filter(p => statusPatientNos.has(p.patientNo));
+    }
+    return new Set(result.map(p => p.patientNo));
+  }, [patients, ageGroupFilter, lensTypeFilter, reminderStatusFilter, reminders]);
+
   const { overdue, upcoming, normal } = useMemo(() => {
-    return {
-      overdue: reminders.filter(r => r.reminderStatus === "overdue"),
-      upcoming: reminders.filter(r => r.reminderStatus === "upcoming"),
-      normal: reminders.filter(r => r.reminderStatus === "normal"),
+    const filterByPatients = (list: PatientReminder[]) => {
+      if (!ageGroupFilter && !lensTypeFilter && !reminderStatusFilter) return list;
+      return list.filter(r => filteredPatientNos.has(r.patientNo));
     };
-  }, [reminders]);
+    return {
+      overdue: filterByPatients(reminders.filter(r => r.reminderStatus === "overdue")),
+      upcoming: filterByPatients(reminders.filter(r => r.reminderStatus === "upcoming")),
+      normal: filterByPatients(reminders.filter(r => r.reminderStatus === "normal")),
+    };
+  }, [reminders, filteredPatientNos, ageGroupFilter, lensTypeFilter, reminderStatusFilter]);
 
   const reminderCounts = {
     overdue: overdue.length,
@@ -4110,8 +4156,11 @@ function App() {
         p.remark.toLowerCase().includes(lower)
       );
     }
+    if (ageGroupFilter || lensTypeFilter || reminderStatusFilter) {
+      result = result.filter(p => filteredPatientNos.has(p.patientNo));
+    }
     return result;
-  }, [patients, patientFilter]);
+  }, [patients, patientFilter, ageGroupFilter, lensTypeFilter, reminderStatusFilter, filteredPatientNos]);
 
   const selectedPatientRecords = useMemo(() => {
     if (!selectedPatientNo) return [];
@@ -4367,7 +4416,7 @@ function App() {
             <p>复查管理</p>
             <h2>复查提醒看板</h2>
           </div>
-          <span className="today-info">共 {reminders.length} 位患者</span>
+          <span className="today-info">共 {overdue.length + upcoming.length + normal.length} 位患者</span>
         </div>
         <div className="reminder-columns">
           <div className="reminder-column">
@@ -4638,18 +4687,51 @@ function App() {
             </button>
           ))}
         </div>
-        <h2>筛选</h2>
+        <h2>年龄段</h2>
         <div className="chips muted">
-          {project.filters.map((filter: string) => (
+          {ageGroups.map(ag => (
             <button
-              key={filter}
-              className={patientFilter === filter ? "chip-active" : ""}
-              onClick={() => setPatientFilter(patientFilter === filter ? "" : filter)}
+              key={ag}
+              className={ageGroupFilter === ag ? "chip-active" : ""}
+              onClick={() => setAgeGroupFilter(ageGroupFilter === ag ? "" : ag)}
             >
-              {filter}
+              {ag}
             </button>
           ))}
         </div>
+        <h2>镜片类型</h2>
+        <div className="chips muted">
+          {lensTypes.map(lt => (
+            <button
+              key={lt}
+              className={lensTypeFilter === lt ? "chip-active" : ""}
+              onClick={() => setLensTypeFilter(lensTypeFilter === lt ? "" : lt)}
+            >
+              {lt}
+            </button>
+          ))}
+        </div>
+        <h2>复查状态</h2>
+        <div className="chips muted">
+          {[
+            { value: "overdue", label: "已逾期" },
+            { value: "upcoming", label: "即将到期" },
+            { value: "normal", label: "正常" },
+          ].map(rs => (
+            <button
+              key={rs.value}
+              className={reminderStatusFilter === rs.value ? "chip-active" : ""}
+              onClick={() => setReminderStatusFilter(reminderStatusFilter === rs.value ? "" : rs.value)}
+            >
+              {rs.label}
+            </button>
+          ))}
+        </div>
+        {hasActiveFilters && (
+          <button className="ghost-btn" style={{ marginTop: "8px", width: "100%" }} onClick={clearAllFilters}>
+            清除筛选
+          </button>
+        )}
         <h2>快速搜索</h2>
         <input
           type="text"
@@ -4727,6 +4809,60 @@ function App() {
             <button className="primary-action" onClick={openAddForm}>+ 新增档案</button>
           )}
         </div>
+      </div>
+
+      <div className="filter-bar">
+        <div className="filter-group">
+          <span className="filter-label">年龄段</span>
+          <div className="filter-chips">
+            {ageGroups.map(ag => (
+              <button
+                key={ag}
+                className={`filter-chip ${ageGroupFilter === ag ? "filter-chip-active" : ""}`}
+                onClick={() => setAgeGroupFilter(ageGroupFilter === ag ? "" : ag)}
+              >
+                {ag}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="filter-group">
+          <span className="filter-label">镜片类型</span>
+          <div className="filter-chips">
+            {lensTypes.map(lt => (
+              <button
+                key={lt}
+                className={`filter-chip ${lensTypeFilter === lt ? "filter-chip-active" : ""}`}
+                onClick={() => setLensTypeFilter(lensTypeFilter === lt ? "" : lt)}
+              >
+                {lt}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="filter-group">
+          <span className="filter-label">复查状态</span>
+          <div className="filter-chips">
+            {[
+              { value: "overdue", label: "已逾期" },
+              { value: "upcoming", label: "即将到期" },
+              { value: "normal", label: "正常" },
+            ].map(rs => (
+              <button
+                key={rs.value}
+                className={`filter-chip ${reminderStatusFilter === rs.value ? "filter-chip-active" : ""}`}
+                onClick={() => setReminderStatusFilter(reminderStatusFilter === rs.value ? "" : rs.value)}
+              >
+                {rs.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {hasActiveFilters && (
+          <button className="filter-clear-btn" onClick={clearAllFilters}>
+            清除筛选
+          </button>
+        )}
       </div>
 
       {showForm && permission.canEditPatientProfile && (

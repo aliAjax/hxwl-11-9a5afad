@@ -3,6 +3,9 @@ import type { SyncConfig } from "./sync";
 
 export interface FilterState {
   comparisonFilter: string;
+  ageGroupFilter: string;
+  lensTypeFilter: string;
+  reminderStatusFilter: string;
 }
 
 export interface ReminderData {
@@ -217,9 +220,21 @@ export async function saveFilters(filters: FilterState): Promise<void> {
 
   return withTransaction(STORE_FILTERS, "readwrite", (store) => {
     return new Promise<void>((resolve, reject) => {
-      const request = store.put({ key: "comparisonFilter", value: filters.comparisonFilter });
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
+      const entries = [
+        { key: "comparisonFilter", value: filters.comparisonFilter },
+        { key: "ageGroupFilter", value: filters.ageGroupFilter },
+        { key: "lensTypeFilter", value: filters.lensTypeFilter },
+        { key: "reminderStatusFilter", value: filters.reminderStatusFilter },
+      ];
+      let completed = 0;
+      entries.forEach((entry) => {
+        const request = store.put(entry);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          completed++;
+          if (completed === entries.length) resolve();
+        };
+      });
     });
   });
 }
@@ -347,18 +362,29 @@ export async function getRecords(): Promise<RefractionRecord[]> {
 
 export async function getFilters(): Promise<FilterState> {
   const db = await initDB();
-  if (!db) return { comparisonFilter: "all" };
+  if (!db) return { comparisonFilter: "all", ageGroupFilter: "", lensTypeFilter: "", reminderStatusFilter: "" };
 
   return withTransaction(STORE_FILTERS, "readonly", (store) => {
     return new Promise<FilterState>((resolve, reject) => {
-      const request = store.get("comparisonFilter");
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const result = request.result;
-        resolve({
-          comparisonFilter: result?.value || "all",
-        });
-      };
+      const keys = ["comparisonFilter", "ageGroupFilter", "lensTypeFilter", "reminderStatusFilter"];
+      const results: Record<string, string> = {};
+      let completed = 0;
+      keys.forEach((key) => {
+        const request = store.get(key);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          results[key] = request.result?.value || (key === "comparisonFilter" ? "all" : "");
+          completed++;
+          if (completed === keys.length) {
+            resolve({
+              comparisonFilter: results.comparisonFilter,
+              ageGroupFilter: results.ageGroupFilter,
+              lensTypeFilter: results.lensTypeFilter,
+              reminderStatusFilter: results.reminderStatusFilter,
+            });
+          }
+        };
+      });
     });
   });
 }
