@@ -31,14 +31,34 @@ export interface SyncSettings {
   syncEnabled: boolean;
 }
 
+export type StepStatus = "not-started" | "completed" | "current" | "blocked";
+
+export type StepBlockReason = "permission" | "data-missing";
+
+export interface StepInfo {
+  status: StepStatus;
+  blockReason?: StepBlockReason;
+  blockDetail?: string;
+  completedAt?: string;
+}
+
+export interface WorkflowStepProgress {
+  patientNo: string;
+  currentStep: string;
+  stepDetails: Record<string, StepInfo>;
+  lastUpdatedAt: string;
+  lastRole: string;
+}
+
 const DB_NAME = "hxwl-11-optometry-db";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const STORE_SYNC_SETTINGS = "syncSettings";
 const STORE_PATIENTS = "patients";
 const STORE_RECORDS = "records";
 const STORE_FILTERS = "filters";
 const STORE_REMINDERS = "reminders";
 const STORE_DRAFTS = "drafts";
+const STORE_WORKFLOW_PROGRESS = "workflowProgress";
 
 let dbInstance: IDBDatabase | null = null;
 let initPromise: Promise<IDBDatabase | null> | null = null;
@@ -108,6 +128,12 @@ export function initDB(): Promise<IDBDatabase | null> {
 
       if (!db.objectStoreNames.contains(STORE_DRAFTS)) {
         db.createObjectStore(STORE_DRAFTS, { keyPath: "key" });
+      }
+
+      if (!db.objectStoreNames.contains(STORE_WORKFLOW_PROGRESS)) {
+        const progressStore = db.createObjectStore(STORE_WORKFLOW_PROGRESS, { keyPath: "patientNo" });
+        progressStore.createIndex("lastUpdatedAt", "lastUpdatedAt", { unique: false });
+        progressStore.createIndex("lastRole", "lastRole", { unique: false });
       }
 
       if (oldVersion < 2 && db.objectStoreNames.contains(STORE_FILTERS)) {
@@ -457,6 +483,13 @@ export async function clearAllData(): Promise<void> {
         request.onsuccess = () => resolve();
       });
     }),
+    withTransaction(STORE_WORKFLOW_PROGRESS, "readwrite", (store) => {
+      return new Promise<void>((resolve, reject) => {
+        const request = store.clear();
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve();
+      });
+    }),
   ]);
 }
 
@@ -628,4 +661,87 @@ export async function getSyncSettings(): Promise<SyncSettings | null> {
     syncEnabled,
     lastFullSync: lastFullSync || undefined,
   };
+}
+
+export async function saveWorkflowProgress(progress: WorkflowStepProgress): Promise<void> {
+  const db = await initDB();
+  if (!db) return;
+
+  return withTransaction(STORE_WORKFLOW_PROGRESS, "readwrite", (store) => {
+    return new Promise<void>((resolve, reject) => {
+      const request = store.put(progress);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+  });
+}
+
+export async function getWorkflowProgress(patientNo: string): Promise<WorkflowStepProgress | null> {
+  const db = await initDB();
+  if (!db) return null;
+
+  return withTransaction(STORE_WORKFLOW_PROGRESS, "readonly", (store) => {
+    return new Promise<WorkflowStepProgress | null>((resolve, reject) => {
+      const request = store.get(patientNo);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        resolve(request.result || null);
+      };
+    });
+  });
+}
+
+export async function getAllWorkflowProgress(): Promise<WorkflowStepProgress[]> {
+  const db = await initDB();
+  if (!db) return [];
+
+  return withTransaction(STORE_WORKFLOW_PROGRESS, "readonly", (store) => {
+    return new Promise<WorkflowStepProgress[]>((resolve, reject) => {
+      const request = store.getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result || []);
+    });
+  });
+}
+
+export async function deleteWorkflowProgress(patientNo: string): Promise<void> {
+  const db = await initDB();
+  if (!db) return;
+
+  return withTransaction(STORE_WORKFLOW_PROGRESS, "readwrite", (store) => {
+    return new Promise<void>((resolve, reject) => {
+      const request = store.delete(patientNo);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+  });
+}
+
+export async function saveLastActivePatient(patientNo: string | null): Promise<void> {
+  const db = await initDB();
+  if (!db) return;
+
+  return withTransaction(STORE_FILTERS, "readwrite", (store) => {
+    return new Promise<void>((resolve, reject) => {
+      const request = store.put({ key: "lastActivePatient", value: patientNo });
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+  });
+}
+
+export async function getLastActivePatient(): Promise<string | null> {
+  const db = await initDB();
+  if (!db) return null;
+
+  return withTransaction(STORE_FILTERS, "readonly", (store) => {
+    return new Promise<string | null>((resolve, reject) => {
+      const request = store.get("lastActivePatient");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const result = request.result;
+        return resolve(result?.value || null);
+      };
+    });
+  });
 }

@@ -19,9 +19,17 @@ import {
   saveDraft,
   getDraft,
   deleteDraft,
+  saveWorkflowProgress,
+  getWorkflowProgress,
+  getAllWorkflowProgress,
+  deleteWorkflowProgress,
+  saveLastActivePatient,
+  getLastActivePatient,
   type AppData,
   type FilterState,
   type ReminderData,
+  type WorkflowStepProgress,
+  type StepInfo,
 } from "./db";
 import {
   type SyncStatus,
@@ -2735,7 +2743,9 @@ function PatientCard({
   onGenerateConflict,
   isSelected,
   canEdit,
-  canDelete
+  canDelete,
+  workflowProgress,
+  role
 }: {
   patient: SyncablePatient;
   index: number;
@@ -2748,6 +2758,8 @@ function PatientCard({
   isSelected: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  workflowProgress?: WorkflowStepProgress | null;
+  role?: UserRole;
 }) {
   const syncStatus = ((patient as any).syncStatus || "synced") as SyncStatus;
   const isSubmitting = (patient as any).isSubmitting;
@@ -2756,6 +2768,46 @@ function PatientCard({
   const syncColor = SYNC_STATUS_COLORS[syncStatus];
   const syncLabel = isSubmitting ? "同步中..." : SYNC_STATUS_LABELS[syncStatus];
   const syncIcon = isSubmitting ? "⟳" : SYNC_STATUS_ICONS[syncStatus];
+
+  const progressSteps: WorkflowStep[] = ["patient-profile", "initial-exam", "recheck-compare", "prescription-summary", "export"];
+  const progressLabels: Record<WorkflowStep, string> = {
+    "dashboard": "总览",
+    "patient-profile": "建档",
+    "initial-exam": "验光",
+    "recheck-compare": "复查",
+    "prescription-summary": "处方",
+    "export": "导出"
+  };
+
+  const computeMiniStepInfo = (step: WorkflowStep): { status: string; blockReason?: string } => {
+    if (!role) return { status: "unknown" };
+    const rolePerm = ROLE_PERMISSIONS[role];
+    const permissionMap: Record<WorkflowStep, keyof RolePermission> = {
+      "dashboard": "canViewPatientProfile",
+      "patient-profile": "canViewPatientProfile",
+      "initial-exam": "canViewInitialExam",
+      "recheck-compare": "canViewRecheckCompare",
+      "prescription-summary": "canViewPrescriptionSummary",
+      "export": "canExport",
+    };
+    const permKey = permissionMap[step];
+    if (!rolePerm[permKey]) return { status: "blocked", blockReason: "无权限" };
+    if (workflowProgress?.stepDetails?.[step]) {
+      const s = workflowProgress.stepDetails[step];
+      return { status: s.status, blockReason: s.blockDetail };
+    }
+    if (step === "patient-profile") return { status: "completed" };
+    return { status: "not-started" };
+  };
+
+  const completedCount = progressSteps.filter(s => {
+    const info = computeMiniStepInfo(s);
+    return info.status === "completed" || info.status === "current";
+  }).length;
+  const totalVisibleSteps = progressSteps.filter(s => {
+    const info = computeMiniStepInfo(s);
+    return info.status !== "blocked" || info.blockReason !== "无权限";
+  }).length;
 
   return (
     <article className={`patient-card patient-card-sync-${syncStatus} ${isSelected ? "patient-card-selected" : ""}`} onClick={onSelect}>
@@ -2782,6 +2834,61 @@ function PatientCard({
           <p className="patient-date">最近复查：{patient.lastCheckDate}</p>
         )}
         {patient.remark && <p className="patient-remark">{patient.remark}</p>}
+        {role && (
+          <div className="patient-progress">
+            <div className="patient-progress-header" title={`已完成 ${completedCount}/${totalVisibleSteps} 个步骤${workflowProgress?.lastUpdatedAt ? ` · 最后更新：${formatSyncTime(workflowProgress.lastUpdatedAt)}` : ""}`}>
+              <span className="patient-progress-title">
+                📋 任务进度
+                {workflowProgress?.currentStep && workflowProgress.currentStep !== "dashboard" && (
+                  <span className="patient-progress-last-step">
+                    · 上次：{STEP_LABELS[workflowProgress.currentStep as WorkflowStep]}
+                  </span>
+                )}
+              </span>
+              <span className="patient-progress-count">{completedCount}/{totalVisibleSteps}</span>
+            </div>
+            <div className="patient-progress-bar" title={`已完成 ${completedCount}/${totalVisibleSteps} 个步骤`}>
+              <div
+                className="patient-progress-fill"
+                style={{
+                  width: `${totalVisibleSteps > 0 ? (completedCount / totalVisibleSteps) * 100 : 0}%`,
+                  backgroundColor: completedCount === totalVisibleSteps ? "var(--accent)" : "var(--primary)"
+                }}
+              />
+            </div>
+            <div className="patient-progress-mini-steps">
+              {progressSteps.map((step) => {
+                const info = computeMiniStepInfo(step);
+                let stepClass = "mini-step";
+                let stepIcon = "";
+                let stepTitle = progressLabels[step];
+                if (info.status === "completed") {
+                  stepClass += " mini-step-completed";
+                  stepIcon = "✓";
+                } else if (info.status === "current") {
+                  stepClass += " mini-step-current";
+                  stepIcon = "●";
+                } else if (info.status === "blocked") {
+                  stepClass += " mini-step-blocked";
+                  stepIcon = "🔒";
+                  stepTitle += ` · ${info.blockReason || "不可用"}`;
+                } else {
+                  stepClass += " mini-step-pending";
+                  stepIcon = "○";
+                }
+                return (
+                  <span
+                    key={step}
+                    className={stepClass}
+                    title={stepTitle}
+                  >
+                    {stepIcon}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {syncError && (
           <p 
             className="patient-sync-error" 
@@ -4252,6 +4359,8 @@ function App() {
   const [currentRole, setCurrentRoleState] = useState<UserRole>("optometrist");
   const [currentStep, setCurrentStep] = useState<WorkflowStep>(ROLE_CONFIGS["optometrist"].defaultStep);
   const [selectedPatientNo, setSelectedPatientNo] = useState<string | null>(null);
+  const [workflowProgressMap, setWorkflowProgressMap] = useState<Record<string, WorkflowStepProgress>>({});
+  const [progressRestored, setProgressRestored] = useState(false);
 
   const [patientFormDirty, setPatientFormDirty] = useState(false);
   const patientFormDataRef = useRef<Omit<PatientProfile, "id">>(emptyForm);
@@ -4268,7 +4377,7 @@ function App() {
   const handleAddRef = useRef<((data: Omit<PatientProfile, "id">) => void) | null>(null);
   const handleEditRef = useRef<((data: Omit<PatientProfile, "id">) => void) | null>(null);
 
-  const switchStep = useCallback((step: WorkflowStep) => {
+  const switchStep = useCallback((step: WorkflowStep, skipCheck = false) => {
     if (showPrescriptionForm && draftSyncRef.current && step !== "initial-exam") {
       const data = draftSyncRef.current;
       const hasContent = data.patientNo.trim() || data.patientName.trim() ||
@@ -4278,8 +4387,26 @@ function App() {
         saveDraft(draftKeyRef.current, data).catch(() => {});
       }
     }
+
+    if (!skipCheck && step !== "dashboard") {
+      const rolePerm = ROLE_PERMISSIONS[currentRole];
+      const permissionMap: Record<WorkflowStep, keyof RolePermission> = {
+        "dashboard": "canViewPatientProfile",
+        "patient-profile": "canViewPatientProfile",
+        "initial-exam": "canViewInitialExam",
+        "recheck-compare": "canViewRecheckCompare",
+        "prescription-summary": "canViewPrescriptionSummary",
+        "export": "canExport",
+      };
+      const permKey = permissionMap[step];
+      if (!rolePerm[permKey]) {
+        showSyncMessage?.(`当前角色「${ROLE_LABELS[currentRole]}」无权访问此步骤`, 3000);
+        return;
+      }
+    }
+
     setCurrentStep(step);
-  }, [showPrescriptionForm, dbSupported, dbReady]);
+  }, [showPrescriptionForm, dbSupported, dbReady, currentRole]);
   const [patientFilter, setPatientFilter] = useState<string>("");
   const [ageGroupFilter, setAgeGroupFilter] = useState<string>("");
   const [lensTypeFilter, setLensTypeFilter] = useState<string>("");
@@ -4470,6 +4597,274 @@ function App() {
     return steps;
   }, [permission]);
 
+  const businessSteps: WorkflowStep[] = useMemo(
+    () => ["patient-profile", "initial-exam", "recheck-compare", "prescription-summary", "export"],
+    []
+  );
+
+  const getPatientRecordCount = useCallback((patientNo: string) => {
+    return records.filter(r => r.patientNo === patientNo).length;
+  }, [records]);
+
+  const getPatientRecordsByType = useCallback((patientNo: string, type: string) => {
+    return records.filter(r => r.patientNo === patientNo && r.type === type).length;
+  }, [records]);
+
+  const computeStepInfo = useCallback(
+    (step: WorkflowStep, patientNo: string | null, role: UserRole): StepInfo => {
+      const rolePerm = ROLE_PERMISSIONS[role];
+      const now = new Date().toISOString();
+
+      const permissionMap: Record<WorkflowStep, keyof RolePermission> = {
+        "dashboard": "canViewPatientProfile",
+        "patient-profile": "canViewPatientProfile",
+        "initial-exam": "canViewInitialExam",
+        "recheck-compare": "canViewRecheckCompare",
+        "prescription-summary": "canViewPrescriptionSummary",
+        "export": "canExport",
+      };
+
+      const permKey = permissionMap[step];
+      if (!rolePerm[permKey]) {
+        return {
+          status: "blocked",
+          blockReason: "permission",
+          blockDetail: `当前角色「${ROLE_LABELS[role]}」无此步骤访问权限`,
+        };
+      }
+
+      if (step === "dashboard") {
+        return { status: "completed", completedAt: now };
+      }
+
+      if (!patientNo) {
+        return { status: "not-started" };
+      }
+
+      const patient = patients.find(p => p.patientNo === patientNo);
+      const existingProgress = workflowProgressMap[patientNo];
+      const prevDetails = existingProgress?.stepDetails || {};
+
+      switch (step) {
+        case "patient-profile": {
+          if (patient) {
+            return {
+              status: "completed",
+              completedAt: prevDetails["patient-profile"]?.completedAt || now,
+            };
+          }
+          return { status: "not-started" };
+        }
+        case "initial-exam": {
+          if (!patient) {
+            return {
+              status: "blocked",
+              blockReason: "data-missing",
+              blockDetail: "请先完成患者建档",
+            };
+          }
+          const examCount = getPatientRecordCount(patientNo);
+          if (examCount > 0) {
+            return {
+              status: "completed",
+              completedAt: prevDetails["initial-exam"]?.completedAt || now,
+            };
+          }
+          return { status: "not-started" };
+        }
+        case "recheck-compare": {
+          if (!patient) {
+            return {
+              status: "blocked",
+              blockReason: "data-missing",
+              blockDetail: "请先完成患者建档",
+            };
+          }
+          const examCount = getPatientRecordCount(patientNo);
+          if (examCount < 2) {
+            return {
+              status: "blocked",
+              blockReason: "data-missing",
+              blockDetail: `至少需要2条验光记录（当前${examCount}条），请先录入初次验光数据`,
+            };
+          }
+          if (existingProgress && prevDetails["recheck-compare"]?.status === "completed") {
+            return {
+              status: "completed",
+              completedAt: prevDetails["recheck-compare"].completedAt,
+            };
+          }
+          return { status: "not-started" };
+        }
+        case "prescription-summary": {
+          if (!patient) {
+            return {
+              status: "blocked",
+              blockReason: "data-missing",
+              blockDetail: "请先完成患者建档",
+            };
+          }
+          const examCount = getPatientRecordCount(patientNo);
+          if (examCount === 0) {
+            return {
+              status: "blocked",
+              blockReason: "data-missing",
+              blockDetail: "请先录入验光记录",
+            };
+          }
+          if (existingProgress && prevDetails["prescription-summary"]?.status === "completed") {
+            return {
+              status: "completed",
+              completedAt: prevDetails["prescription-summary"].completedAt,
+            };
+          }
+          return { status: "not-started" };
+        }
+        case "export": {
+          if (!patient) {
+            return {
+              status: "blocked",
+              blockReason: "data-missing",
+              blockDetail: "请先完成患者建档",
+            };
+          }
+          const examCount = getPatientRecordCount(patientNo);
+          if (examCount === 0) {
+            return {
+              status: "blocked",
+              blockReason: "data-missing",
+              blockDetail: "请先录入验光记录",
+            };
+          }
+          if (existingProgress && prevDetails["export"]?.status === "completed") {
+            return {
+              status: "completed",
+              completedAt: prevDetails["export"].completedAt,
+            };
+          }
+          return { status: "not-started" };
+        }
+      }
+      return { status: "not-started" };
+    },
+    [patients, workflowProgressMap, getPatientRecordCount]
+  );
+
+  const selectedPatientStepDetails: Record<WorkflowStep, StepInfo> = useMemo(() => {
+    const result = {} as Record<WorkflowStep, StepInfo>;
+    const allSteps: WorkflowStep[] = [
+      "dashboard",
+      "patient-profile",
+      "initial-exam",
+      "recheck-compare",
+      "prescription-summary",
+      "export",
+    ];
+    allSteps.forEach((step) => {
+      result[step] = computeStepInfo(step, selectedPatientNo, currentRole);
+    });
+    return result;
+  }, [computeStepInfo, selectedPatientNo, currentRole]);
+
+  const savePatientProgress = useCallback(
+    async (
+      patientNo: string,
+      step: WorkflowStep,
+      markCompleted?: WorkflowStep[]
+    ) => {
+      if (!dbSupported || !dbReady) return;
+
+      const now = new Date().toISOString();
+      const existing = workflowProgressMap[patientNo];
+      const stepDetails: Record<string, StepInfo> = { ...(existing?.stepDetails || {}) };
+
+      businessSteps.forEach((bs) => {
+        if (!stepDetails[bs]) {
+          stepDetails[bs] = computeStepInfo(bs, patientNo, currentRole);
+        } else {
+          const recomputed = computeStepInfo(bs, patientNo, currentRole);
+          if (recomputed.status === "blocked") {
+            stepDetails[bs] = recomputed;
+          } else if (recomputed.status === "completed" && stepDetails[bs].status !== "completed") {
+            stepDetails[bs] = recomputed;
+          }
+        }
+      });
+
+      if (markCompleted) {
+        markCompleted.forEach((s) => {
+          stepDetails[s] = {
+            status: "completed",
+            completedAt: stepDetails[s]?.completedAt || now,
+          };
+        });
+      }
+
+      stepDetails[step] = {
+        ...(stepDetails[step] || {}),
+        status: "current",
+      };
+
+      const progress: WorkflowStepProgress = {
+        patientNo,
+        currentStep: step,
+        stepDetails,
+        lastUpdatedAt: now,
+        lastRole: currentRole,
+      };
+
+      try {
+        await saveWorkflowProgress(progress);
+        setWorkflowProgressMap((prev) => ({ ...prev, [patientNo]: progress }));
+      } catch (err) {
+        console.error("保存工作流进度失败:", err);
+      }
+    },
+    [dbSupported, dbReady, workflowProgressMap, businessSteps, computeStepInfo, currentRole]
+  );
+
+  const markStepCompleted = useCallback(
+    async (patientNo: string, step: WorkflowStep) => {
+      if (!dbSupported || !dbReady) return;
+      const now = new Date().toISOString();
+      const existing = workflowProgressMap[patientNo];
+      const stepDetails = { ...(existing?.stepDetails || {}) };
+
+      businessSteps.forEach((bs) => {
+        stepDetails[bs] = stepDetails[bs] || computeStepInfo(bs, patientNo, currentRole);
+      });
+
+      stepDetails[step] = {
+        status: "completed",
+        completedAt: stepDetails[step]?.completedAt || now,
+      };
+
+      const currentStepForProgress = existing?.currentStep || step;
+      if (stepDetails[currentStepForProgress]?.status !== "current") {
+        stepDetails[currentStepForProgress] = {
+          ...(stepDetails[currentStepForProgress] || {}),
+          status: currentStepForProgress === step ? "completed" : "current",
+        };
+      }
+
+      const progress: WorkflowStepProgress = {
+        patientNo,
+        currentStep: currentStepForProgress,
+        stepDetails,
+        lastUpdatedAt: now,
+        lastRole: currentRole,
+      };
+
+      try {
+        await saveWorkflowProgress(progress);
+        setWorkflowProgressMap((prev) => ({ ...prev, [patientNo]: progress }));
+      } catch (err) {
+        console.error("标记步骤完成失败:", err);
+      }
+    },
+    [dbSupported, dbReady, workflowProgressMap, businessSteps, computeStepInfo, currentRole]
+  );
+
   const reminders = useMemo(() => {
     return patients
       .filter(p => p.lastCheckDate)
@@ -4632,6 +5027,42 @@ function App() {
             });
             setCustomCycles(cycleMap);
           }
+
+          const allProgress = await getAllWorkflowProgress();
+          const progressMap: Record<string, WorkflowStepProgress> = {};
+          allProgress.forEach(p => {
+            progressMap[p.patientNo] = p;
+          });
+          setWorkflowProgressMap(progressMap);
+
+          const lastPatient = await getLastActivePatient();
+          if (lastPatient) {
+            const progress = progressMap[lastPatient];
+            const patientExists = persistedData.patients.some(p => p.patientNo === lastPatient) ||
+              initialPatients.some(p => p.patientNo === lastPatient);
+            if (patientExists && progress) {
+              const savedStep = progress.currentStep as WorkflowStep;
+              const rolePerm = ROLE_PERMISSIONS[currentRole];
+              const permissionMap: Record<WorkflowStep, keyof RolePermission> = {
+                "dashboard": "canViewPatientProfile",
+                "patient-profile": "canViewPatientProfile",
+                "initial-exam": "canViewInitialExam",
+                "recheck-compare": "canViewRecheckCompare",
+                "prescription-summary": "canViewPrescriptionSummary",
+                "export": "canExport",
+              };
+              const permKey = permissionMap[savedStep];
+              if (rolePerm[permKey]) {
+                setSelectedPatientNo(lastPatient);
+                setCurrentStep(savedStep);
+              } else {
+                setSelectedPatientNo(lastPatient);
+              }
+            } else if (patientExists) {
+              setSelectedPatientNo(lastPatient);
+            }
+          }
+          setProgressRestored(true);
         }
       } catch (err) {
         console.error("数据库初始化失败:", err);
@@ -4699,10 +5130,34 @@ function App() {
       setLensRecommendationResult(null);
       setCustomCycles({});
       setSelectedPatientNo(null);
+      setWorkflowProgressMap({});
     } catch (err) {
       console.error("清空数据失败:", err);
     }
   };
+
+  useEffect(() => {
+    if (!progressRestored || !dbSupported || !dbReady) return;
+    if (!selectedPatientNo || currentStep === "dashboard") {
+      if (selectedPatientNo) {
+        saveLastActivePatient(selectedPatientNo).catch(() => {});
+      }
+      return;
+    }
+    saveLastActivePatient(selectedPatientNo).catch(() => {});
+    savePatientProgress(selectedPatientNo, currentStep);
+  }, [selectedPatientNo, currentStep, progressRestored, dbSupported, dbReady, savePatientProgress]);
+
+  useEffect(() => {
+    if (!progressRestored || !selectedPatientNo || currentStep === "dashboard") return;
+    const autoMarkSteps: WorkflowStep[] = ["recheck-compare", "prescription-summary"];
+    if (autoMarkSteps.includes(currentStep)) {
+      const stepInfo = computeStepInfo(currentStep, selectedPatientNo, currentRole);
+      if (stepInfo.status !== "blocked") {
+        markStepCompleted(selectedPatientNo, currentStep).catch(() => {});
+      }
+    }
+  }, [currentStep, selectedPatientNo, progressRestored, computeStepInfo, currentRole, markStepCompleted]);
 
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -5212,6 +5667,7 @@ function App() {
     setPatients(prev => [newPatient, ...prev]);
     setShowForm(false);
     setSelectedPatientNo(newPatient.patientNo);
+    markStepCompleted(newPatient.patientNo, "patient-profile").catch(() => {});
     if (permission.canViewInitialExam) {
       setCurrentStep("initial-exam");
     }
@@ -5233,6 +5689,12 @@ function App() {
     if (targetPatientNo) {
       setRecords(prev => prev.filter(r => r.patientNo !== targetPatientNo));
       setCustomCycles(prev => {
+        const next = { ...prev };
+        delete next[targetPatientNo];
+        return next;
+      });
+      deleteWorkflowProgress(targetPatientNo).catch(() => {});
+      setWorkflowProgressMap(prev => {
         const next = { ...prev };
         delete next[targetPatientNo];
         return next;
@@ -5357,7 +5819,9 @@ function App() {
     setPrescriptionDraftSavedAt(null);
     draftSyncRef.current = null;
     deleteDraft(draftKeyRef.current).catch(() => {});
+    let needCreatePatient = false;
     if (!patients.find(p => p.patientNo === data.patientNo)) {
+      needCreatePatient = true;
       const newPatient = createSyncableEntity(
         {
           id: `p-${Date.now()}`,
@@ -5379,6 +5843,14 @@ function App() {
       }));
     }
     setSelectedPatientNo(data.patientNo);
+    setTimeout(async () => {
+      try {
+        if (needCreatePatient) {
+          await markStepCompleted(data.patientNo, "patient-profile");
+        }
+        await markStepCompleted(data.patientNo, "initial-exam");
+      } catch {}
+    }, 50);
     if (permission.canViewPrescriptionSummary) {
       setCurrentStep("prescription-summary");
     }
@@ -5494,7 +5966,31 @@ function App() {
   }, [visibleReminders, selectedReminderPatientNos]);
 
   const handleSelectPatient = (patientNo: string) => {
+    const isToggleOff = selectedPatientNo === patientNo;
     setSelectedPatientNo(prev => prev === patientNo ? null : patientNo);
+
+    if (!isToggleOff && progressRestored) {
+      const progress = workflowProgressMap[patientNo];
+      if (progress?.currentStep && progress.currentStep !== "dashboard") {
+        const savedStep = progress.currentStep as WorkflowStep;
+        const rolePerm = ROLE_PERMISSIONS[currentRole];
+        const permissionMap: Record<WorkflowStep, keyof RolePermission> = {
+          "dashboard": "canViewPatientProfile",
+          "patient-profile": "canViewPatientProfile",
+          "initial-exam": "canViewInitialExam",
+          "recheck-compare": "canViewRecheckCompare",
+          "prescription-summary": "canViewPrescriptionSummary",
+          "export": "canExport",
+        };
+        const permKey = permissionMap[savedStep];
+        if (rolePerm[permKey]) {
+          const stepInfo = computeStepInfo(savedStep, patientNo, currentRole);
+          if (stepInfo.status !== "blocked") {
+            setTimeout(() => switchStep(savedStep), 50);
+          }
+        }
+      }
+    }
   };
 
   const handleExportSinglePrescription = (record: RefractionRecord) => {
@@ -5511,6 +6007,7 @@ function App() {
     URL.revokeObjectURL(url);
     setExportSuccess(`已导出处方: ${record.patientNo}`);
     setTimeout(() => setExportSuccess(null), 3000);
+    markStepCompleted(record.patientNo, "export").catch(() => {});
   };
 
   const handleExportAllCSV = () => {
@@ -6222,6 +6719,8 @@ function App() {
               isSelected={selectedPatientNo === patient.patientNo}
               canEdit={permission.canEditPatientProfile}
               canDelete={permission.canEditPatientProfile}
+              workflowProgress={workflowProgressMap[patient.patientNo]}
+              role={currentRole}
             />
           )
         ))}
@@ -6780,13 +7279,32 @@ function App() {
       <div className="workflow-flow-summary">
         <h3 className="workflow-section-title">验光流程闭环完成</h3>
         <div className="workflow-flow-steps">
-          {(["patient-profile", "initial-exam", "recheck-compare", "prescription-summary", "export"] as WorkflowStep[]).map((step, idx) => (
-            <div key={step} className={`workflow-flow-step ${step === currentStep ? "step-active" : "step-done"}`}>
-              <span className="workflow-flow-icon">{STEP_ICONS[step]}</span>
-              <span className="workflow-flow-label">{STEP_LABELS[step]}</span>
-              {idx < 4 && <span className="workflow-flow-arrow">→</span>}
-            </div>
-          ))}
+          {(["patient-profile", "initial-exam", "recheck-compare", "prescription-summary", "export"] as WorkflowStep[]).map((step, idx) => {
+            const stepInfo = selectedPatientStepDetails[step] || computeStepInfo(step, selectedPatientNo, currentRole);
+            const isBlocked = stepInfo.status === "blocked";
+            const isCompleted = stepInfo.status === "completed";
+            const isCurrent = step === currentStep;
+            let stepClass = "";
+            if (isCurrent) stepClass = "step-active";
+            else if (isCompleted) stepClass = "step-done";
+            else if (isBlocked) stepClass = "step-blocked";
+
+            const stepStatusIcon = isBlocked ? "🔒" : isCompleted ? "✓" : "";
+            return (
+              <div
+                key={step}
+                className={`workflow-flow-step ${stepClass}`}
+                title={stepInfo.blockDetail || (isCompleted ? "已完成" : isCurrent ? "当前步骤" : "待完成")}
+              >
+                <span className="workflow-flow-icon">
+                  {STEP_ICONS[step]}
+                  {stepStatusIcon && <span className="step-status-badge">{stepStatusIcon}</span>}
+                </span>
+                <span className="workflow-flow-label">{STEP_LABELS[step]}</span>
+                {idx < 4 && <span className="workflow-flow-arrow">→</span>}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -6900,16 +7418,34 @@ function App() {
       </section>
 
       <nav className="workflow-nav">
-        {workflowSteps.map((step) => (
-          <button
-            key={step}
-            className={`workflow-nav-item ${currentStep === step ? "workflow-nav-active" : ""}`}
-            onClick={() => switchStep(step)}
-          >
-            <span className="workflow-nav-icon">{STEP_ICONS[step]}</span>
-            <span className="workflow-nav-label">{STEP_LABELS[step]}</span>
-          </button>
-        ))}
+        {workflowSteps.map((step) => {
+          const stepInfo = selectedPatientStepDetails[step] || computeStepInfo(step, selectedPatientNo, currentRole);
+          const isBlocked = stepInfo.status === "blocked";
+          const isCompleted = stepInfo.status === "completed" && currentStep !== step;
+          const isCurrent = currentStep === step;
+          let statusClass = "";
+          if (isCurrent) statusClass = "workflow-nav-active";
+          else if (isCompleted) statusClass = "workflow-nav-completed";
+          else if (isBlocked) statusClass = "workflow-nav-blocked";
+
+          const statusIcon = isBlocked ? "🔒" : isCompleted ? "✅" : "";
+
+          return (
+            <button
+              key={step}
+              className={`workflow-nav-item ${statusClass}`}
+              onClick={() => !isBlocked && switchStep(step)}
+              disabled={isBlocked}
+              title={stepInfo.blockDetail || (isCompleted ? "已完成" : isCurrent ? "当前步骤" : "")}
+            >
+              <span className="workflow-nav-icon">
+                {STEP_ICONS[step]}
+                {statusIcon && <span className="workflow-nav-status">{statusIcon}</span>}
+              </span>
+              <span className="workflow-nav-label">{STEP_LABELS[step]}</span>
+            </button>
+          );
+        })}
       </nav>
 
       <section className="role-selector-bar panel">
