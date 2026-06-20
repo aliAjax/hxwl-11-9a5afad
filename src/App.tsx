@@ -1923,7 +1923,8 @@ function PrescriptionForm({
   draftSavedAt,
   onDraftChange,
   onDraftDiscard,
-  onDirtyChange
+  onDirtyChange,
+  submitRef
 }: {
   onSubmit: (record: Omit<RefractionRecord, "id" | "summary"> & { summary: string }) => void;
   onCancel: () => void;
@@ -1934,6 +1935,7 @@ function PrescriptionForm({
   onDraftChange?: (data: PrescriptionFormData) => void;
   onDraftDiscard?: () => void;
   onDirtyChange?: (dirty: boolean, data: PrescriptionFormData) => void;
+  submitRef?: React.MutableRefObject<(() => boolean) | null>;
 }) {
   const resolveInitialFormData = (): PrescriptionFormData => {
     if (initialData) {
@@ -2168,12 +2170,11 @@ function PrescriptionForm({
     vertical: curv.vertical ? formatNumber(curv.vertical, 2) : ""
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (readOnly) return;
+  const trySubmit = useCallback((): boolean => {
+    if (readOnly) return false;
     const validationErrors = validate();
     setErrors(validationErrors);
-    if (Object.keys(validationErrors).length > 0) return;
+    if (Object.keys(validationErrors).length > 0) return false;
 
     const sanitizedRightEye = sanitizeEyeData(formData.rightEye);
     const sanitizedLeftEye = sanitizeEyeData(formData.leftEye);
@@ -2203,7 +2204,24 @@ function PrescriptionForm({
     if (onDirtyChange) onDirtyChange(false, emptyPrescriptionForm);
     setFormData(emptyPrescriptionForm);
     setErrors({});
+    return true;
+  }, [readOnly, formData, onSubmit, onDirtyChange]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    trySubmit();
   };
+
+  useEffect(() => {
+    if (submitRef) {
+      submitRef.current = trySubmit;
+    }
+    return () => {
+      if (submitRef) {
+        submitRef.current = null;
+      }
+    };
+  }, [submitRef, trySubmit]);
 
   const EyeBlock = ({ eye, title, eyeErrors }: {
     eye: "rightEye" | "leftEye";
@@ -4218,7 +4236,13 @@ function App() {
   const [showRoleSwitchConfirm, setShowRoleSwitchConfirm] = useState(false);
   const pendingRoleRef = useRef<UserRole | null>(null);
   const patientFormSubmitRef = useRef<((data: Omit<PatientProfile, "id">) => void) | null>(null);
-  const prescriptionFormSubmitRef = useRef<((data: Omit<RefractionRecord, "id" | "summary"> & { summary: string }) => void) | null>(null);
+  const prescriptionFormSubmitRef = useRef<(() => boolean) | null>(null);
+  const cancelAddRef = useRef<(() => void) | null>(null);
+  const cancelEditRef = useRef<(() => void) | null>(null);
+  const cancelPrescriptionFormRef = useRef<(() => void) | null>(null);
+  const handlePrescriptionDraftDiscardRef = useRef<(() => void) | null>(null);
+  const handleAddRef = useRef<((data: Omit<PatientProfile, "id">) => void) | null>(null);
+  const handleEditRef = useRef<((data: Omit<PatientProfile, "id">) => void) | null>(null);
 
   const switchStep = useCallback((step: WorkflowStep) => {
     if (showPrescriptionForm && draftSyncRef.current && step !== "initial-exam") {
@@ -4326,7 +4350,10 @@ function App() {
       }
     }
     if (info?.hasPrescriptionUnsaved) {
-      cancelPrescriptionForm();
+      const submitted = prescriptionFormSubmitRef.current ? prescriptionFormSubmitRef.current() : false;
+      if (!submitted && cancelPrescriptionFormRef.current) {
+        cancelPrescriptionFormRef.current();
+      }
     }
     if (info?.hasConflictOpen) {
       setShowConflictModal(false);
@@ -4335,17 +4362,17 @@ function App() {
     if (pendingRoleRef.current) {
       finalizeRoleSwitch(pendingRoleRef.current);
     }
-  }, [detectUnsavedEditions, finalizeRoleSwitch, cancelPrescriptionForm]);
+  }, [detectUnsavedEditions, finalizeRoleSwitch]);
 
   const handleRoleSwitchDiscard = useCallback(() => {
     const info = pendingRoleRef.current ? detectUnsavedEditions(pendingRoleRef.current) : null;
     if (info?.hasPatientUnsaved) {
-      if (showForm) cancelAdd();
-      if (editingId) cancelEdit();
+      if (showForm && cancelAddRef.current) cancelAddRef.current();
+      if (editingId && cancelEditRef.current) cancelEditRef.current();
     }
     if (info?.hasPrescriptionUnsaved) {
-      handlePrescriptionDraftDiscard();
-      cancelPrescriptionForm();
+      if (handlePrescriptionDraftDiscardRef.current) handlePrescriptionDraftDiscardRef.current();
+      if (cancelPrescriptionFormRef.current) cancelPrescriptionFormRef.current();
     }
     if (info?.hasConflictOpen) {
       setShowConflictModal(false);
@@ -4354,7 +4381,7 @@ function App() {
     if (pendingRoleRef.current) {
       finalizeRoleSwitch(pendingRoleRef.current);
     }
-  }, [detectUnsavedEditions, finalizeRoleSwitch, showForm, editingId, handlePrescriptionDraftDiscard, cancelPrescriptionForm, cancelAdd, cancelEdit]);
+  }, [detectUnsavedEditions, finalizeRoleSwitch, showForm, editingId]);
 
   const handleRoleSwitchCancel = useCallback(() => {
     setShowRoleSwitchConfirm(false);
@@ -4373,25 +4400,28 @@ function App() {
 
   useEffect(() => {
     if (showForm) {
-      patientFormSubmitRef.current = handleAdd;
+      patientFormSubmitRef.current = handleAddRef.current;
       patientFormDataRef.current = emptyForm;
       setPatientFormDirty(false);
-    } else if (editingId && editingPatient) {
-      patientFormSubmitRef.current = handleEdit;
-      patientFormDataRef.current = {
-        patientNo: editingPatient.patientNo,
-        ageGroup: editingPatient.ageGroup,
-        lensType: editingPatient.lensType,
-        lastCheckDate: editingPatient.lastCheckDate,
-        remark: editingPatient.remark
-      };
-      setPatientFormDirty(false);
+    } else if (editingId) {
+      const target = patients.find(p => p.id === editingId);
+      if (target) {
+        patientFormSubmitRef.current = handleEditRef.current;
+        patientFormDataRef.current = {
+          patientNo: target.patientNo,
+          ageGroup: target.ageGroup,
+          lensType: target.lensType,
+          lastCheckDate: target.lastCheckDate,
+          remark: target.remark
+        };
+        setPatientFormDirty(false);
+      }
     } else {
       patientFormSubmitRef.current = null;
       patientFormDataRef.current = emptyForm;
       setPatientFormDirty(false);
     }
-  }, [showForm, editingId, editingPatient, handleAdd, handleEdit]);
+  }, [showForm, editingId, patients]);
 
   useEffect(() => {
     if (!showPrescriptionForm) {
@@ -5258,6 +5288,15 @@ function App() {
     setPrescriptionDraftSavedAt(null);
     deleteDraft(draftKeyRef.current).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    cancelAddRef.current = cancelAdd;
+    cancelEditRef.current = cancelEdit;
+    cancelPrescriptionFormRef.current = cancelPrescriptionForm;
+    handlePrescriptionDraftDiscardRef.current = handlePrescriptionDraftDiscard;
+    handleAddRef.current = handleAdd;
+    handleEditRef.current = handleEdit;
+  }, [cancelAdd, cancelEdit, cancelPrescriptionForm, handlePrescriptionDraftDiscard, handleAdd, handleEdit]);
 
   const handlePrescriptionSubmit = (data: Omit<RefractionRecord, "id" | "summary"> & { summary: string }) => {
     const newRecord = createSyncableEntity(
@@ -6227,6 +6266,7 @@ function App() {
           onDraftChange={handlePrescriptionDraftChange}
           onDraftDiscard={handlePrescriptionDraftDiscard}
           onDirtyChange={handlePrescriptionFormDirtyChange}
+          submitRef={prescriptionFormSubmitRef}
         />
       )}
 
