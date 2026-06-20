@@ -2731,6 +2731,7 @@ function PatientCard({
   onDelete,
   onSelect,
   onSync,
+  onViewError,
   onGenerateConflict,
   isSelected,
   canEdit,
@@ -2742,6 +2743,7 @@ function PatientCard({
   onDelete: () => void;
   onSelect: () => void;
   onSync?: () => void;
+  onViewError?: () => void;
   onGenerateConflict?: () => void;
   isSelected: boolean;
   canEdit: boolean;
@@ -2750,6 +2752,7 @@ function PatientCard({
   const syncStatus = ((patient as any).syncStatus || "synced") as SyncStatus;
   const isSubmitting = (patient as any).isSubmitting;
   const submitCount = (patient as any).submitCount || 0;
+  const syncError = (patient as any).syncError;
   const syncColor = SYNC_STATUS_COLORS[syncStatus];
   const syncLabel = isSubmitting ? "同步中..." : SYNC_STATUS_LABELS[syncStatus];
   const syncIcon = isSubmitting ? "⟳" : SYNC_STATUS_ICONS[syncStatus];
@@ -2779,12 +2782,17 @@ function PatientCard({
           <p className="patient-date">最近复查：{patient.lastCheckDate}</p>
         )}
         {patient.remark && <p className="patient-remark">{patient.remark}</p>}
-        {(patient as any).syncError && (
-          <p className="patient-sync-error" title={(patient as any).syncError}>
-            ⚠️ 同步失败：{(patient as any).syncError}
+        {syncError && (
+          <p 
+            className="patient-sync-error" 
+            onClick={e => { e.stopPropagation(); onViewError?.(); }}
+            title="点击查看错误详情"
+          >
+            ⚠️ 同步失败：{syncError}
+            <span className="view-error-link">查看详情 →</span>
           </p>
         )}
-        {(canEdit || canDelete || onSync) && (
+        {(canEdit || canDelete || onSync || onViewError) && (
           <div className="patient-actions" onClick={e => e.stopPropagation()}>
             {onSync && syncStatus !== "synced" && !isSubmitting && (
               <button 
@@ -2792,7 +2800,15 @@ function PatientCard({
                 onClick={onSync}
                 style={{ color: syncColor }}
               >
-                {syncStatus === "conflict" ? "处理冲突" : syncStatus === "failed" ? "重试" : "同步"}
+                {syncStatus === "conflict" ? "处理冲突" : syncStatus === "failed" ? "重试同步" : "立即同步"}
+              </button>
+            )}
+            {onViewError && syncStatus === "failed" && !isSubmitting && (
+              <button 
+                className="text-btn view-error-btn" 
+                onClick={onViewError}
+              >
+                查看错误
               </button>
             )}
             {isSubmitting && (
@@ -4149,15 +4165,18 @@ function generateRecordsExportCSV(records: RefractionRecord[], patients: Patient
 function RecordSyncIndicator({
   record,
   onSync,
+  onViewError,
   onGenerateConflict
 }: {
   record: SyncableRecord;
   onSync?: () => void;
+  onViewError?: () => void;
   onGenerateConflict?: () => void;
 }) {
   const syncStatus = ((record as any).syncStatus || "synced") as SyncStatus;
   const isSubmitting = (record as any).isSubmitting;
   const submitCount = (record as any).submitCount || 0;
+  const syncError = (record as any).syncError;
   if (syncStatus === "synced" && !onGenerateConflict && !isSubmitting) return null;
 
   const syncColor = SYNC_STATUS_COLORS[syncStatus];
@@ -4169,7 +4188,7 @@ function RecordSyncIndicator({
       <span
         className="tag tag-sync-status"
         style={{ backgroundColor: syncColor + "15", color: syncColor, borderColor: syncColor + "40" }}
-        title={`${syncLabel}${(record as any).lastSyncedAt ? ` · 上次同步：${formatSyncTime((record as any).lastSyncedAt)}` : ""}${(record as any).syncError ? ` · 错误：${(record as any).syncError}` : ""}${submitCount > 0 ? ` · 已提交 ${submitCount} 次` : ""}`}
+        title={`${syncLabel}${(record as any).lastSyncedAt ? ` · 上次同步：${formatSyncTime((record as any).lastSyncedAt)}` : ""}${syncError ? ` · 错误：${syncError}` : ""}${submitCount > 0 ? ` · 已提交 ${submitCount} 次` : ""}`}
       >
         {syncIcon} {syncLabel}
       </span>
@@ -4180,7 +4199,12 @@ function RecordSyncIndicator({
       )}
       {onSync && syncStatus !== "synced" && !isSubmitting && (
         <button className="text-btn sync-btn" onClick={onSync} style={{ color: syncColor, fontSize: "12px" }}>
-          {syncStatus === "conflict" ? "处理冲突" : syncStatus === "failed" ? "重试" : "同步"}
+          {syncStatus === "conflict" ? "处理冲突" : syncStatus === "failed" ? "重试同步" : "立即同步"}
+        </button>
+      )}
+      {onViewError && syncStatus === "failed" && !isSubmitting && (
+        <button className="text-btn view-error-btn" onClick={onViewError} style={{ fontSize: "12px" }}>
+          查看错误
         </button>
       )}
       {onGenerateConflict && syncStatus === "synced" && !isSubmitting && (
@@ -4268,6 +4292,8 @@ function App() {
   const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [showConflictModal, setShowConflictModal] = useState(false);
   const [conflictEntity, setConflictEntity] = useState<{ type: EntityType; entity: any } | null>(null);
+  const [showSyncErrorModal, setShowSyncErrorModal] = useState(false);
+  const [syncErrorEntity, setSyncErrorEntity] = useState<{ type: EntityType; entity: any } | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const autoSyncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -4707,9 +4733,22 @@ function App() {
     setSyncProgress({ current: 0, total: 0 });
 
     try {
-      const pendingPatients = patients.filter(p => p.syncStatus === "pending" || p.syncStatus === "failed");
-      const pendingRecords = records.filter(r => r.syncStatus === "pending" || r.syncStatus === "failed");
+      const pendingPatients = patients.filter(p => 
+        (p.syncStatus === "pending" || p.syncStatus === "failed") && 
+        !p.isSubmitting
+      );
+      const pendingRecords = records.filter(r => 
+        (r.syncStatus === "pending" || r.syncStatus === "failed") && 
+        !r.isSubmitting
+      );
       const total = pendingPatients.length + pendingRecords.length;
+      
+      if (total === 0) {
+        showSyncMessage("没有需要同步的记录");
+        setIsSyncing(false);
+        return;
+      }
+      
       setSyncProgress({ current: 0, total });
 
       let completed = 0;
@@ -4915,6 +4954,11 @@ function App() {
   const openConflictModal = useCallback((type: EntityType, entity: any) => {
     setConflictEntity({ type, entity });
     setShowConflictModal(true);
+  }, []);
+
+  const openSyncErrorModal = useCallback((type: EntityType, entity: any) => {
+    setSyncErrorEntity({ type, entity });
+    setShowSyncErrorModal(true);
   }, []);
 
   const openDrawer = (record: RefractionRecord) => {
@@ -6173,6 +6217,7 @@ function App() {
                   handleSyncEntity("patient", patient.id);
                 }
               }}
+              onViewError={() => openSyncErrorModal("patient", patient)}
               onGenerateConflict={() => handleGenerateConflict("patient", patient.id)}
               isSelected={selectedPatientNo === patient.patientNo}
               canEdit={permission.canEditPatientProfile}
@@ -6219,6 +6264,7 @@ function App() {
                         handleSyncEntity("record", record.id);
                       }
                     }}
+                    onViewError={() => openSyncErrorModal("record", record)}
                     onGenerateConflict={() => handleGenerateConflict("record", record.id)}
                   />
                 </div>
@@ -6320,6 +6366,7 @@ function App() {
                         handleSyncEntity("record", record.id);
                       }
                     }}
+                    onViewError={() => openSyncErrorModal("record", record)}
                     onGenerateConflict={() => handleGenerateConflict("record", record.id)}
                   />
                 </div>
@@ -6584,6 +6631,7 @@ function App() {
                       handleSyncEntity("record", record.id);
                     }
                   }}
+                  onViewError={() => openSyncErrorModal("record", record)}
                   onGenerateConflict={() => handleGenerateConflict("record", record.id)}
                 />
               </div>
@@ -6685,6 +6733,7 @@ function App() {
                         handleSyncEntity("record", record.id);
                       }
                     }}
+                    onViewError={() => openSyncErrorModal("record", record)}
                     onGenerateConflict={() => handleGenerateConflict("record", record.id)}
                   />
                 </div>
@@ -7166,6 +7215,68 @@ function App() {
                   </div>
                 )}
               </div>
+
+              <div className="sync-failed-section">
+                <h4>同步失败记录</h4>
+                {overallSyncStats.failed === 0 ? (
+                  <p className="sync-empty-text">暂无失败记录</p>
+                ) : (
+                  <div className="sync-failed-list">
+                    {patients.filter(p => p.syncStatus === "failed").map(patient => (
+                      <div key={patient.id} className="sync-failed-item">
+                        <div className="sync-failed-info">
+                          <span className="sync-failed-type">患者档案</span>
+                          <span className="sync-failed-name">{patient.patientNo}</span>
+                          <p className="sync-failed-error" title={(patient as any).syncError}>
+                            {(patient as any).syncError || "未知错误"}
+                          </p>
+                        </div>
+                        <div className="sync-failed-actions">
+                          <button 
+                            className="text-btn"
+                            onClick={() => openSyncErrorModal("patient", patient)}
+                          >
+                            查看详情
+                          </button>
+                          <button 
+                            className="sync-conflict-btn"
+                            onClick={() => handleSyncEntity("patient", patient.id)}
+                            disabled={(patient as any).isSubmitting}
+                          >
+                            {(patient as any).isSubmitting ? "同步中..." : "重试"}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {records.filter(r => r.syncStatus === "failed").map(record => (
+                      <div key={record.id} className="sync-failed-item">
+                        <div className="sync-failed-info">
+                          <span className="sync-failed-type">验光记录</span>
+                          <span className="sync-failed-name">{record.patientNo} · {record.examDate}</span>
+                          <p className="sync-failed-error" title={(record as any).syncError}>
+                            {(record as any).syncError || "未知错误"}
+                          </p>
+                        </div>
+                        <div className="sync-failed-actions">
+                          <button 
+                            className="text-btn"
+                            onClick={() => openSyncErrorModal("record", record)}
+                          >
+                            查看详情
+                          </button>
+                          <button 
+                            className="sync-conflict-btn"
+                            onClick={() => handleSyncEntity("record", record.id)}
+                            disabled={(record as any).isSubmitting}
+                          >
+                            {(record as any).isSubmitting ? "同步中..." : "重试"}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -7276,6 +7387,96 @@ function App() {
                   onClick={() => handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, true)}
                 >
                   保留本地版本
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {showSyncErrorModal && syncErrorEntity && (() => {
+        const entity = syncErrorEntity.entity;
+        const entityType = syncErrorEntity.type;
+        const typeLabel = entityType === "patient" ? "患者档案" : "验光记录";
+        const entityName = entityType === "patient" 
+          ? entity.patientNo 
+          : `${entity.patientNo} · ${entity.examDate}`;
+        
+        return (
+          <div className="modal-overlay" onClick={() => setShowSyncErrorModal(false)}>
+            <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3>同步错误详情</h3>
+                <button className="modal-close" onClick={() => setShowSyncErrorModal(false)}>✕</button>
+              </div>
+              <div className="modal-body">
+                <div className="sync-error-warning">
+                  <div className="sync-error-icon">✕</div>
+                  <div className="sync-error-text">
+                    <strong>同步失败</strong>
+                    <p>{typeLabel}「{entityName}」最近一次同步遇到错误</p>
+                  </div>
+                </div>
+
+                <div className="sync-error-details">
+                  <div className="sync-error-detail-row">
+                    <span className="sync-error-detail-label">错误信息</span>
+                    <span className="sync-error-detail-value error-text">
+                      {entity.syncError || "未知错误"}
+                    </span>
+                  </div>
+                  <div className="sync-error-detail-row">
+                    <span className="sync-error-detail-label">提交次数</span>
+                    <span className="sync-error-detail-value">
+                      {entity.submitCount || 0} 次
+                    </span>
+                  </div>
+                  <div className="sync-error-detail-row">
+                    <span className="sync-error-detail-label">最后尝试时间</span>
+                    <span className="sync-error-detail-value">
+                      {entity.lastSyncAttempt ? formatSyncTime(entity.lastSyncAttempt) : "—"}
+                    </span>
+                  </div>
+                  <div className="sync-error-detail-row">
+                    <span className="sync-error-detail-label">上次成功同步</span>
+                    <span className="sync-error-detail-value">
+                      {entity.lastSyncedAt ? formatSyncTime(entity.lastSyncedAt) : "从未同步"}
+                    </span>
+                  </div>
+                  <div className="sync-error-detail-row">
+                    <span className="sync-error-detail-label">本地版本</span>
+                    <span className="sync-error-detail-value">
+                      v{entity.localVersion || 1}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="sync-error-hint">
+                  <p><strong>常见原因与解决方案：</strong></p>
+                  <ul>
+                    <li><strong>网络超时：</strong>请检查网络连接后点击"重试同步"</li>
+                    <li><strong>服务器错误：</strong>服务器暂时不可用，请稍后再试</li>
+                    <li><strong>重复提交：</strong>请等待几秒后再重试，避免频繁提交</li>
+                    <li><strong>数据冲突：</strong>服务端数据有更新，需处理冲突后再同步</li>
+                  </ul>
+                </div>
+              </div>
+              <div className="modal-actions">
+                <button className="ghost-btn" onClick={() => setShowSyncErrorModal(false)}>
+                  关闭
+                </button>
+                <button 
+                  className="primary-action"
+                  onClick={() => {
+                    setShowSyncErrorModal(false);
+                    if (entity.syncStatus === "conflict") {
+                      openConflictModal(entityType, entity);
+                    } else {
+                      handleSyncEntity(entityType, entity.id);
+                    }
+                  }}
+                >
+                  {entity.syncStatus === "conflict" ? "处理冲突" : "重试同步"}
                 </button>
               </div>
             </div>
