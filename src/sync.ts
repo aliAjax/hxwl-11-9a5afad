@@ -415,6 +415,12 @@ export interface FieldResolution {
   choice: FieldChoice;
 }
 
+export interface MergeHistoryItem {
+  mergeTimestamp: string;
+  resolutions: FieldResolution[];
+  serverVersionAtMerge: number;
+}
+
 export interface MergeResult<T> {
   mergedData: T;
   resolutions: FieldResolution[];
@@ -425,11 +431,7 @@ export interface ConflictData {
   serverData: any;
   localData: any;
   conflictType: "update-update" | "update-delete" | "delete-update";
-  mergeHistory?: Array<{
-    mergeTimestamp: string;
-    resolutions: FieldResolution[];
-    serverVersionAtMerge: number;
-  }>;
+  mergeHistory?: MergeHistoryItem[];
 }
 
 const PATIENT_FIELD_LABELS: Record<string, string> = {
@@ -482,7 +484,7 @@ export function computeFieldDiffs(
   if (type === "record" && localData?.leftEye && serverData?.leftEye) {
     const eyeFields: Record<string, string> = {
       sphere: "球镜(SPH)", cylinder: "柱镜(CYL)", axis: "轴位(AXI)",
-      vision: "裸眼视力", correctedVision: "矫正视力", add: "下加光(ADD)"
+      nakedVision: "裸眼视力", correctedVision: "矫正视力", add: "下加光(ADD)"
     };
     for (const [f, label] of Object.entries(eyeFields)) {
       const lv = localData.leftEye?.[f];

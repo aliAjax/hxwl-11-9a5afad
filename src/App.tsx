@@ -41,6 +41,7 @@ import {
   type FieldDiff,
   type FieldResolution,
   type FieldChoice,
+  type MergeHistoryItem,
   DEFAULT_SYNC_CONFIG,
   SYNC_STATUS_LABELS,
   SYNC_STATUS_COLORS,
@@ -6367,7 +6368,7 @@ function App() {
                         className={`patient-item ${customSelectPatientNo === patient.patientNo ? "selected" : ""}`}
                         onClick={() => handleSelectPatientForCustom(patient.patientNo)}
                       >
-                        {patient.patientNo} · {patient.patientName}
+                        {patient.patientNo} · {getPatientRecords(records, patient.patientNo)[0]?.patientName || patient.patientNo}
                         <span style={{ float: "right", color: "#94a3b8", fontSize: "12px" }}>
                           {getPatientRecords(records, patient.patientNo).length} 条记录
                         </span>
@@ -7015,7 +7016,7 @@ function App() {
                       className={`patient-item ${customSelectPatientNo === patient.patientNo ? "selected" : ""}`}
                       onClick={() => handleSelectPatientForCustom(patient.patientNo)}
                     >
-                      {patient.patientNo} · {patient.patientName}
+                      {patient.patientNo} · {getPatientRecords(records, patient.patientNo)[0]?.patientName || patient.patientNo}
                       <span style={{ float: "right", color: "#94a3b8", fontSize: "12px" }}>
                         {getPatientRecords(records, patient.patientNo).length} 条记录
                       </span>
@@ -7856,7 +7857,7 @@ function App() {
         );
         const changedFields = fieldDiffs.filter(d => d.isDifferent);
         const unchangedFields = fieldDiffs.filter(d => !d.isDifferent);
-        const mergeHistory = conflictEntity.entity.conflictData?.mergeHistory || [];
+        const mergeHistory: MergeHistoryItem[] = conflictEntity.entity.conflictData?.mergeHistory || [];
 
         const handleFieldChoiceChange = (field: string, choice: FieldChoice) => {
           setFieldResolutions(prev => ({
