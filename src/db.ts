@@ -32,12 +32,13 @@ export interface SyncSettings {
 }
 
 const DB_NAME = "hxwl-11-optometry-db";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE_SYNC_SETTINGS = "syncSettings";
 const STORE_PATIENTS = "patients";
 const STORE_RECORDS = "records";
 const STORE_FILTERS = "filters";
 const STORE_REMINDERS = "reminders";
+const STORE_DRAFTS = "drafts";
 
 let dbInstance: IDBDatabase | null = null;
 let initPromise: Promise<IDBDatabase | null> | null = null;
@@ -103,6 +104,10 @@ export function initDB(): Promise<IDBDatabase | null> {
 
       if (!db.objectStoreNames.contains(STORE_SYNC_SETTINGS)) {
         db.createObjectStore(STORE_SYNC_SETTINGS, { keyPath: "key" });
+      }
+
+      if (!db.objectStoreNames.contains(STORE_DRAFTS)) {
+        db.createObjectStore(STORE_DRAFTS, { keyPath: "key" });
       }
 
       if (oldVersion < 2 && db.objectStoreNames.contains(STORE_FILTERS)) {
@@ -445,6 +450,13 @@ export async function clearAllData(): Promise<void> {
         request.onsuccess = () => resolve();
       });
     }),
+    withTransaction(STORE_DRAFTS, "readwrite", (store) => {
+      return new Promise<void>((resolve, reject) => {
+        const request = store.clear();
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve();
+      });
+    }),
   ]);
 }
 
@@ -454,6 +466,52 @@ export function closeDB(): void {
     dbInstance = null;
     initPromise = null;
   }
+}
+
+export async function saveDraft(key: string, data: any): Promise<void> {
+  const db = await initDB();
+  if (!db) return;
+
+  return withTransaction(STORE_DRAFTS, "readwrite", (store) => {
+    return new Promise<void>((resolve, reject) => {
+      const request = store.put({ key, data, savedAt: new Date().toISOString() });
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+  });
+}
+
+export async function getDraft(key: string): Promise<{ data: any; savedAt: string } | null> {
+  const db = await initDB();
+  if (!db) return null;
+
+  return withTransaction(STORE_DRAFTS, "readonly", (store) => {
+    return new Promise<{ data: any; savedAt: string } | null>((resolve, reject) => {
+      const request = store.get(key);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const result = request.result;
+        if (result && result.data !== undefined) {
+          resolve({ data: result.data, savedAt: result.savedAt });
+        } else {
+          resolve(null);
+        }
+      };
+    });
+  });
+}
+
+export async function deleteDraft(key: string): Promise<void> {
+  const db = await initDB();
+  if (!db) return;
+
+  return withTransaction(STORE_DRAFTS, "readwrite", (store) => {
+    return new Promise<void>((resolve, reject) => {
+      const request = store.delete(key);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+  });
 }
 
 export async function hasPersistedData(): Promise<boolean> {

@@ -16,6 +16,9 @@ import {
   saveSyncConfig,
   getSyncSettings,
   saveSyncSettings,
+  saveDraft,
+  getDraft,
+  deleteDraft,
   type AppData,
   type FilterState,
   type ReminderData,
@@ -1726,39 +1729,91 @@ function PrescriptionForm({
   onSubmit,
   onCancel,
   readOnly = false,
-  initialData
+  initialData,
+  draftData,
+  draftSavedAt,
+  onDraftChange,
+  onDraftDiscard
 }: {
   onSubmit: (record: Omit<RefractionRecord, "id" | "summary"> & { summary: string }) => void;
   onCancel: () => void;
   readOnly?: boolean;
   initialData?: RefractionRecord;
+  draftData?: PrescriptionFormData | null;
+  draftSavedAt?: string | null;
+  onDraftChange?: (data: PrescriptionFormData) => void;
+  onDraftDiscard?: () => void;
 }) {
-  const [formData, setFormData] = useState<PrescriptionFormData>(
-    initialData ? {
-      patientNo: initialData.patientNo,
-      patientName: initialData.patientName,
-      ageGroup: initialData.ageGroup,
-      gender: initialData.gender,
-      examDate: initialData.examDate,
-      category: initialData.category,
-      type: initialData.type,
-      rightEye: { ...initialData.rightEye },
-      leftEye: { ...initialData.leftEye },
-      pd: initialData.pd,
-      cornealCurvature: {
-        right: { ...initialData.cornealCurvature.right },
-        left: { ...initialData.cornealCurvature.left }
-      },
-      recommendation: initialData.recommendation
-    } : emptyPrescriptionForm
-  );
+  const resolveInitialFormData = (): PrescriptionFormData => {
+    if (initialData) {
+      return {
+        patientNo: initialData.patientNo,
+        patientName: initialData.patientName,
+        ageGroup: initialData.ageGroup,
+        gender: initialData.gender,
+        examDate: initialData.examDate,
+        category: initialData.category,
+        type: initialData.type,
+        rightEye: { ...initialData.rightEye },
+        leftEye: { ...initialData.leftEye },
+        pd: initialData.pd,
+        cornealCurvature: {
+          right: { ...initialData.cornealCurvature.right },
+          left: { ...initialData.cornealCurvature.left }
+        },
+        recommendation: initialData.recommendation
+      };
+    }
+    if (draftData) {
+      return {
+        patientNo: draftData.patientNo || "",
+        patientName: draftData.patientName || "",
+        ageGroup: draftData.ageGroup || "",
+        gender: draftData.gender || "",
+        examDate: draftData.examDate || formatLocalDate(new Date()),
+        category: draftData.category || "",
+        type: draftData.type || "初配",
+        rightEye: { ...emptyEye, ...draftData.rightEye },
+        leftEye: { ...emptyEye, ...draftData.leftEye },
+        pd: draftData.pd || "",
+        cornealCurvature: {
+          right: { ...emptyCurvature, ...(draftData.cornealCurvature?.right || {}) },
+          left: { ...emptyCurvature, ...(draftData.cornealCurvature?.left || {}) }
+        },
+        recommendation: draftData.recommendation || ""
+      };
+    }
+    return emptyPrescriptionForm;
+  };
+
+  const [formData, setFormData] = useState<PrescriptionFormData>(resolveInitialFormData);
   const [errors, setErrors] = useState<PrescriptionErrors>({});
+  const [showDraftBanner, setShowDraftBanner] = useState(!!draftData);
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const notifyDraftChange = useCallback((data: PrescriptionFormData) => {
+    if (!onDraftChange) return;
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = setTimeout(() => {
+      onDraftChange(data);
+    }, 800);
+  }, [onDraftChange]);
+
+  useEffect(() => {
+    return () => {
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    };
+  }, []);
 
   const setField = <K extends keyof PrescriptionFormData>(field: K, value: PrescriptionFormData[K]) => {
     if (field === "pd") {
       value = cleanNumber(value as string, false) as PrescriptionFormData[K];
     }
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData(prev => {
+      const next = { ...prev, [field]: value };
+      notifyDraftChange(next);
+      return next;
+    });
   };
 
   const setEyeField = (
@@ -1774,10 +1829,14 @@ function PrescriptionForm({
     } else if (field === "axis") {
       cleaned = cleanNumber(value, false);
     }
-    setFormData(prev => ({
-      ...prev,
-      [eye]: { ...prev[eye], [field]: cleaned }
-    }));
+    setFormData(prev => {
+      const next = {
+        ...prev,
+        [eye]: { ...prev[eye], [field]: cleaned }
+      };
+      notifyDraftChange(next);
+      return next;
+    });
   };
 
   const setCurvatureField = (
@@ -1786,13 +1845,17 @@ function PrescriptionForm({
     value: string
   ) => {
     const cleaned = cleanNumber(value, false);
-    setFormData(prev => ({
-      ...prev,
-      cornealCurvature: {
-        ...prev.cornealCurvature,
-        [eye]: { ...prev.cornealCurvature[eye], [field]: cleaned }
-      }
-    }));
+    setFormData(prev => {
+      const next = {
+        ...prev,
+        cornealCurvature: {
+          ...prev.cornealCurvature,
+          [eye]: { ...prev.cornealCurvature[eye], [field]: cleaned }
+        }
+      };
+      notifyDraftChange(next);
+      return next;
+    });
   };
 
   const validate = (): PrescriptionErrors => {
@@ -1997,6 +2060,24 @@ function PrescriptionForm({
 
   return (
     <form className="prescription-form" onSubmit={handleSubmit}>
+      {showDraftBanner && draftSavedAt && (
+        <div className="draft-banner">
+          <span className="draft-banner-icon">📋</span>
+          <span className="draft-banner-text">
+            已恢复 {new Date(draftSavedAt).toLocaleString("zh-CN")} 保存的草稿
+          </span>
+          <button type="button" className="draft-banner-discard" onClick={() => {
+            setShowDraftBanner(false);
+            setFormData(emptyPrescriptionForm);
+            if (onDraftDiscard) onDraftDiscard();
+          }}>
+            丢弃草稿
+          </button>
+          <button type="button" className="draft-banner-close" onClick={() => setShowDraftBanner(false)}>
+            ✕
+          </button>
+        </div>
+      )}
       <div className="form-section">
         <div className="form-section-title">基础信息</div>
         <div className="form-row">
@@ -3836,6 +3917,10 @@ function App() {
   const [records, setRecords] = useState<SyncableRecord[]>([]);
   const [showPrescriptionForm, setShowPrescriptionForm] = useState(false);
   const [showImportForm, setShowImportForm] = useState(false);
+  const [prescriptionDraft, setPrescriptionDraft] = useState<PrescriptionFormData | null>(null);
+  const [prescriptionDraftSavedAt, setPrescriptionDraftSavedAt] = useState<string | null>(null);
+  const draftKeyRef = useRef<string>("prescription-draft");
+  const draftSyncRef = useRef<PrescriptionFormData | null>(null);
   const [comparisonDrawerOpen, setComparisonDrawerOpen] = useState(false);
   const [selectedComparison, setSelectedComparison] = useState<PrescriptionComparisonResult | null>(null);
   const [comparisonFilter, setComparisonFilter] = useState<ComparisonCategory | "all">("all");
@@ -3849,6 +3934,19 @@ function App() {
   const [currentRole, setCurrentRoleState] = useState<UserRole>("optometrist");
   const [currentStep, setCurrentStep] = useState<WorkflowStep>(ROLE_CONFIGS["optometrist"].defaultStep);
   const [selectedPatientNo, setSelectedPatientNo] = useState<string | null>(null);
+
+  const switchStep = useCallback((step: WorkflowStep) => {
+    if (showPrescriptionForm && draftSyncRef.current && step !== "initial-exam") {
+      const data = draftSyncRef.current;
+      const hasContent = data.patientNo.trim() || data.patientName.trim() ||
+        data.rightEye.sphere.trim() || data.leftEye.sphere.trim() ||
+        data.rightEye.cylinder.trim() || data.leftEye.cylinder.trim();
+      if (hasContent && dbSupported && dbReady) {
+        saveDraft(draftKeyRef.current, data).catch(() => {});
+      }
+    }
+    setCurrentStep(step);
+  }, [showPrescriptionForm, dbSupported, dbReady]);
   const [patientFilter, setPatientFilter] = useState<string>("");
   const [ageGroupFilter, setAgeGroupFilter] = useState<string>("");
   const [lensTypeFilter, setLensTypeFilter] = useState<string>("");
@@ -3876,10 +3974,19 @@ function App() {
   }, []);
 
   const handleRoleChange = useCallback((role: UserRole) => {
+    if (showPrescriptionForm && draftSyncRef.current && dbSupported && dbReady) {
+      const data = draftSyncRef.current;
+      const hasContent = data.patientNo.trim() || data.patientName.trim() ||
+        data.rightEye.sphere.trim() || data.leftEye.sphere.trim() ||
+        data.rightEye.cylinder.trim() || data.leftEye.cylinder.trim();
+      if (hasContent) {
+        saveDraft(draftKeyRef.current, data).catch(() => {});
+      }
+    }
     setCurrentRoleState(role);
     setCurrentStep(ROLE_CONFIGS[role].defaultStep);
     setExportSuccess(null);
-  }, []);
+  }, [showPrescriptionForm, dbSupported, dbReady]);
 
   const setCurrentRole = handleRoleChange;
 
@@ -4126,6 +4233,24 @@ function App() {
       console.error("清空数据失败:", err);
     }
   };
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (showPrescriptionForm && draftSyncRef.current) {
+        const data = draftSyncRef.current;
+        const hasContent = data.patientNo.trim() || data.patientName.trim() ||
+          data.rightEye.sphere.trim() || data.leftEye.sphere.trim() ||
+          data.rightEye.cylinder.trim() || data.leftEye.cylinder.trim();
+        if (hasContent) {
+          try {
+            localStorage.setItem(draftKeyRef.current, JSON.stringify({ data, savedAt: new Date().toISOString() }));
+          } catch {}
+        }
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [showPrescriptionForm]);
 
   const showSyncMessage = useCallback((msg: string, duration = 3000) => {
     setSyncMessage(msg);
@@ -4551,13 +4676,76 @@ function App() {
     setShowForm(false);
   };
 
-  const openPrescriptionForm = () => {
+  const openPrescriptionForm = async () => {
+    let draftData: PrescriptionFormData | null = null;
+    let draftTime: string | null = null;
+
+    if (dbSupported && dbReady) {
+      try {
+        const saved = await getDraft(draftKeyRef.current);
+        if (saved && saved.data) {
+          draftData = saved.data as PrescriptionFormData;
+          draftTime = saved.savedAt;
+        }
+      } catch {}
+    }
+
+    try {
+      const lsRaw = localStorage.getItem(draftKeyRef.current);
+      if (lsRaw) {
+        const lsParsed = JSON.parse(lsRaw);
+        if (lsParsed.data) {
+          if (!draftData || (lsParsed.savedAt && draftTime && lsParsed.savedAt > draftTime)) {
+            draftData = lsParsed.data as PrescriptionFormData;
+            draftTime = lsParsed.savedAt;
+          }
+          localStorage.removeItem(draftKeyRef.current);
+          if (draftData && dbSupported && dbReady) {
+            saveDraft(draftKeyRef.current, draftData).catch(() => {});
+          }
+        }
+      }
+    } catch {}
+
+    setPrescriptionDraft(draftData);
+    setPrescriptionDraftSavedAt(draftTime);
     setShowPrescriptionForm(true);
   };
 
   const cancelPrescriptionForm = () => {
+    if (draftSyncRef.current && dbSupported && dbReady) {
+      const data = draftSyncRef.current;
+      const hasContent = data.patientNo.trim() || data.patientName.trim() ||
+        data.rightEye.sphere.trim() || data.leftEye.sphere.trim() ||
+        data.rightEye.cylinder.trim() || data.leftEye.cylinder.trim();
+      if (hasContent) {
+        saveDraft(draftKeyRef.current, data).catch(() => {});
+      } else {
+        deleteDraft(draftKeyRef.current).catch(() => {});
+      }
+    }
     setShowPrescriptionForm(false);
+    setPrescriptionDraft(null);
+    setPrescriptionDraftSavedAt(null);
   };
+
+  const handlePrescriptionDraftChange = useCallback((data: PrescriptionFormData) => {
+    draftSyncRef.current = data;
+    if (!dbSupported || !dbReady) return;
+    const hasContent = data.patientNo.trim() || data.patientName.trim() ||
+      data.rightEye.sphere.trim() || data.leftEye.sphere.trim() ||
+      data.rightEye.cylinder.trim() || data.leftEye.cylinder.trim();
+    if (!hasContent) return;
+    saveDraft(draftKeyRef.current, data).then(() => {
+      setPrescriptionDraftSavedAt(new Date().toISOString());
+    }).catch(() => {});
+  }, [dbSupported, dbReady]);
+
+  const handlePrescriptionDraftDiscard = useCallback(() => {
+    setPrescriptionDraft(null);
+    setPrescriptionDraftSavedAt(null);
+    deleteDraft(draftKeyRef.current).catch(() => {});
+  }, []);
 
   const handlePrescriptionSubmit = (data: Omit<RefractionRecord, "id" | "summary"> & { summary: string }) => {
     const newRecord = createSyncableEntity(
@@ -4566,6 +4754,10 @@ function App() {
     );
     setRecords(prev => [newRecord, ...prev]);
     setShowPrescriptionForm(false);
+    setPrescriptionDraft(null);
+    setPrescriptionDraftSavedAt(null);
+    draftSyncRef.current = null;
+    deleteDraft(draftKeyRef.current).catch(() => {});
     if (!patients.find(p => p.patientNo === data.patientNo)) {
       const newPatient = createSyncableEntity(
         {
@@ -4760,7 +4952,7 @@ function App() {
             <button
               key={step}
               className={`quick-action-btn ${idx === 0 ? "primary" : ""}`}
-              onClick={() => setCurrentStep(step)}
+              onClick={() => switchStep(step)}
             >
               <span className="quick-action-icon">{STEP_ICONS[step]}</span>
               <span className="quick-action-text">{STEP_LABELS[step]}</span>
@@ -4856,7 +5048,7 @@ function App() {
                 <button
                   className="text-btn"
                   style={{ marginTop: "8px", alignSelf: "center" }}
-                  onClick={() => setCurrentStep("recheck-compare")}
+                  onClick={() => switchStep("recheck-compare")}
                 >
                   查看全部 {overdue.length} 条 →
                 </button>
@@ -4905,7 +5097,7 @@ function App() {
                 <button
                   className="text-btn"
                   style={{ marginTop: "8px", alignSelf: "center" }}
-                  onClick={() => setCurrentStep("recheck-compare")}
+                  onClick={() => switchStep("recheck-compare")}
                 >
                   查看全部 {upcoming.length} 条 →
                 </button>
@@ -4954,7 +5146,7 @@ function App() {
                 <button
                   className="text-btn"
                   style={{ marginTop: "8px", alignSelf: "center" }}
-                  onClick={() => setCurrentStep("recheck-compare")}
+                  onClick={() => switchStep("recheck-compare")}
                 >
                   查看全部 {normal.length} 条 →
                 </button>
@@ -5022,7 +5214,7 @@ function App() {
             <div style={{ textAlign: "center", marginTop: "12px" }}>
               <button
                 className="ghost-btn"
-                onClick={() => setCurrentStep("recheck-compare")}
+                onClick={() => switchStep("recheck-compare")}
               >
                 查看全部 {filteredComparisons.length} 条对比 →
               </button>
@@ -5378,7 +5570,7 @@ function App() {
           {permission.canViewInitialExam && (
             <button
               className="primary-action"
-              onClick={() => setCurrentStep("initial-exam")}
+              onClick={() => switchStep("initial-exam")}
               disabled={!selectedPatientNo && selectedPatientRecords.length === 0}
             >
               下一步 → 初次验光
@@ -5410,6 +5602,10 @@ function App() {
         <PrescriptionForm
           onSubmit={handlePrescriptionSubmit}
           onCancel={cancelPrescriptionForm}
+          draftData={prescriptionDraft}
+          draftSavedAt={prescriptionDraftSavedAt}
+          onDraftChange={handlePrescriptionDraftChange}
+          onDraftDiscard={handlePrescriptionDraftDiscard}
         />
       )}
 
@@ -5479,11 +5675,11 @@ function App() {
       )}
 
       <div className="workflow-next-step">
-        <button className="ghost-btn" onClick={() => setCurrentStep("patient-profile")}>
+        <button className="ghost-btn" onClick={() => switchStep("patient-profile")}>
           ← 上一步
         </button>
         {permission.canViewRecheckCompare && (
-          <button className="primary-action" onClick={() => setCurrentStep("recheck-compare")}>
+          <button className="primary-action" onClick={() => switchStep("recheck-compare")}>
             下一步 → 复查对比
           </button>
         )}
@@ -5565,13 +5761,13 @@ function App() {
       </div>
 
       <div className="workflow-next-step">
-        <button className="ghost-btn" onClick={() => setCurrentStep("initial-exam")}>
+        <button className="ghost-btn" onClick={() => switchStep("initial-exam")}>
           ← 上一步
         </button>
         {permission.canViewPrescriptionSummary && (
           <button
             className="primary-action"
-            onClick={() => setCurrentStep("prescription-summary")}
+            onClick={() => switchStep("prescription-summary")}
           >
             下一步 → 处方摘要
           </button>
@@ -5665,11 +5861,11 @@ function App() {
       )}
 
       <div className="workflow-next-step">
-        <button className="ghost-btn" onClick={() => setCurrentStep("recheck-compare")}>
+        <button className="ghost-btn" onClick={() => switchStep("recheck-compare")}>
           ← 上一步
         </button>
         {permission.canExport && (
-          <button className="primary-action" onClick={() => setCurrentStep("export")}>
+          <button className="primary-action" onClick={() => switchStep("export")}>
             下一步 → 导出摘要
           </button>
         )}
@@ -5784,7 +5980,7 @@ function App() {
       </div>
 
       <div className="workflow-next-step">
-        <button className="ghost-btn" onClick={() => setCurrentStep("prescription-summary")}>
+        <button className="ghost-btn" onClick={() => switchStep("prescription-summary")}>
           ← 返回处方摘要
         </button>
         <button className="primary-action" onClick={() => {
@@ -5897,7 +6093,7 @@ function App() {
           <button
             key={step}
             className={`workflow-nav-item ${currentStep === step ? "workflow-nav-active" : ""}`}
-            onClick={() => setCurrentStep(step)}
+            onClick={() => switchStep(step)}
           >
             <span className="workflow-nav-icon">{STEP_ICONS[step]}</span>
             <span className="workflow-nav-label">{STEP_LABELS[step]}</span>
