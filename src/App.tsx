@@ -1559,12 +1559,13 @@ function generateLensRecommendation(input: LensRecommendationInput): LensRecomme
 
 const statusColors = ["status-ok", "status-watch", "status-danger"];
 
-function MetricCard({ label, value, index }: { label: string; value: string; index: number }) {
+function MetricCard({ label, value, index, statusClass }: { label: string; value: string; index: number; statusClass?: string }) {
+  const colorClass = statusClass || statusColors[index % statusColors.length];
   return (
     <article className="metric-card">
       <span>{label}</span>
       <strong>{value}</strong>
-      <i className={statusColors[index % statusColors.length]} />
+      <i className={colorClass} />
     </article>
   );
 }
@@ -4458,19 +4459,35 @@ function App() {
     return patients.find(p => p.patientNo === selectedPatientNo);
   }, [patients, selectedPatientNo]);
 
-  const metricLabels = [
+  const metricLabels = useMemo(() => [
     "患者总数",
+    "已逾期复查",
+    "即将到期复查",
+    "正常复查",
     "近视进展",
     "散光变化",
     "处方稳定",
-  ];
+  ], []);
 
-  const metricValues = [
+  const metricValues = useMemo(() => [
     String(patients.length),
+    String(overdue.length),
+    String(upcoming.length),
+    String(normal.length),
     String(myopiaProgress.length),
     String(astigmatismChange.length),
     String(stable.length),
-  ];
+  ], [patients.length, overdue.length, upcoming.length, normal.length, myopiaProgress.length, astigmatismChange.length, stable.length]);
+
+  const metricStatusClasses = useMemo(() => [
+    "status-ok",
+    "status-danger",
+    "status-watch",
+    "status-ok",
+    "status-danger",
+    "status-watch",
+    "status-ok",
+  ], []);
 
   const handleAdd = (data: Omit<PatientProfile, "id">) => {
     const newPatient = createSyncableEntity(
@@ -5155,7 +5172,13 @@ function App() {
       "metrics": (
         <section key="metrics" className="metrics-grid">
           {metricLabels.map((metric: string, index: number) => (
-            <MetricCard key={metric} label={metric} value={metricValues[index]} index={index} />
+            <MetricCard
+              key={metric}
+              label={metric}
+              value={metricValues[index]}
+              index={index}
+              statusClass={metricStatusClasses[index]}
+            />
           ))}
         </section>
       ),
