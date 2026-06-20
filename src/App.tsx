@@ -2781,10 +2781,10 @@ function PatientCard({
     "export": "导出"
   };
 
-  const computeMiniStepInfo = (step: WorkflowStep): { status: string; blockReason?: string } => {
+  const computeMiniStepInfo = (step: WorkflowStep): { status: string; blockReason?: string; blockDetail?: string } => {
     if (computedStepDetails && computedStepDetails[step]) {
       const s = computedStepDetails[step];
-      return { status: s.status, blockReason: s.blockDetail };
+      return { status: s.status, blockReason: s.blockReason, blockDetail: s.blockDetail };
     }
     if (!role) return { status: "unknown" };
     const rolePerm = ROLE_PERMISSIONS[role];
@@ -2797,10 +2797,10 @@ function PatientCard({
       "export": "canExport",
     };
     const permKey = permissionMap[step];
-    if (!rolePerm[permKey]) return { status: "blocked", blockReason: "无权限" };
+    if (!rolePerm[permKey]) return { status: "blocked", blockReason: "permission", blockDetail: "无权限" };
     if (workflowProgress?.stepDetails?.[step]) {
       const s = workflowProgress.stepDetails[step];
-      return { status: s.status, blockReason: s.blockDetail };
+      return { status: s.status, blockReason: s.blockReason, blockDetail: s.blockDetail };
     }
     if (step === "patient-profile") return { status: "completed" };
     return { status: "not-started" };
@@ -2812,7 +2812,7 @@ function PatientCard({
   }).length;
   const totalVisibleSteps = progressSteps.filter(s => {
     const info = computeMiniStepInfo(s);
-    return info.status !== "blocked" || info.blockReason !== "无权限";
+    return info.status !== "blocked" || info.blockReason !== "permission";
   }).length;
 
   return (
@@ -2877,7 +2877,7 @@ function PatientCard({
                 } else if (info.status === "blocked") {
                   stepClass += " mini-step-blocked";
                   stepIcon = "🔒";
-                  stepTitle += ` · ${info.blockReason || "不可用"}`;
+                  stepTitle += ` · ${info.blockDetail || info.blockReason || "不可用"}`;
                 } else {
                   stepClass += " mini-step-pending";
                   stepIcon = "○";
