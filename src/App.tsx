@@ -2454,7 +2454,10 @@ function ReminderCard({
   onCycleReset,
   canEditCycle,
   onSync,
-  onGenerateConflict
+  onGenerateConflict,
+  isSelected,
+  onToggleSelect,
+  selectionMode
 }: {
   reminder: PatientReminder;
   index: number;
@@ -2464,6 +2467,9 @@ function ReminderCard({
   canEditCycle: boolean;
   onSync?: () => void;
   onGenerateConflict?: () => void;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
+  selectionMode?: boolean;
 }) {
   const syncStatus = ((reminder as any).syncStatus || "synced") as SyncStatus;
   const isSubmitting = (reminder as any).isSubmitting;
@@ -2502,7 +2508,18 @@ function ReminderCard({
   };
 
   return (
-    <article className={`reminder-card reminder-${reminder.reminderStatus} reminder-sync-${syncStatus}`}>
+    <article className={`reminder-card reminder-${reminder.reminderStatus} reminder-sync-${syncStatus} ${isSelected ? "reminder-selected" : ""} ${selectionMode ? "reminder-card-with-selection" : ""}`}>
+      {selectionMode && (
+        <div className="reminder-select-wrap" onClick={(e) => e.stopPropagation()}>
+          <label className="reminder-select-label">
+            <input
+              type="checkbox"
+              checked={!!isSelected}
+              onChange={() => onToggleSelect && onToggleSelect()}
+            />
+          </label>
+        </div>
+      )}
       <div className={`reminder-index ${config.className}`} style={syncStatus !== "synced" ? { backgroundColor: syncColor + "20", color: syncColor } : undefined}>
         {syncStatus !== "synced" ? syncIcon : String(index + 1).padStart(2, "0")}
       </div>
@@ -3825,6 +3842,8 @@ function App() {
   const [lensRecommendationResult, setLensRecommendationResult] = useState<LensRecommendationResult | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [customCycles, setCustomCycles] = useState<Record<string, number>>({});
+  const [selectedReminderPatientNos, setSelectedReminderPatientNos] = useState<Set<string>>(new Set());
+  const [showBatchResetConfirm, setShowBatchResetConfirm] = useState(false);
 
   const [currentRole, setCurrentRoleState] = useState<UserRole>("optometrist");
   const [currentStep, setCurrentStep] = useState<WorkflowStep>(ROLE_CONFIGS["optometrist"].defaultStep);
@@ -4607,6 +4626,65 @@ function App() {
     });
   };
 
+  const visibleReminders = useMemo(() => [...overdue, ...upcoming, ...normal], [overdue, upcoming, normal]);
+
+  const handleToggleReminderSelect = (patientNo: string) => {
+    setSelectedReminderPatientNos(prev => {
+      const next = new Set(prev);
+      if (next.has(patientNo)) {
+        next.delete(patientNo);
+      } else {
+        next.add(patientNo);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllVisibleReminders = () => {
+    const allNos = visibleReminders.map(r => r.patientNo);
+    const allSelected = allNos.every(no => selectedReminderPatientNos.has(no));
+    if (allSelected) {
+      setSelectedReminderPatientNos(new Set());
+    } else {
+      setSelectedReminderPatientNos(new Set(allNos));
+    }
+  };
+
+  const handleClearReminderSelection = () => {
+    setSelectedReminderPatientNos(new Set());
+  };
+
+  const openBatchResetConfirm = () => {
+    const countWithCustom = Array.from(selectedReminderPatientNos).filter(no => customCycles[no]).length;
+    if (countWithCustom === 0) {
+      showSyncMessage("所选患者中没有使用自定义周期的记录");
+      return;
+    }
+    setShowBatchResetConfirm(true);
+  };
+
+  const handleBatchResetCycles = () => {
+    const affectedPatientNos = Array.from(selectedReminderPatientNos).filter(no => customCycles[no]);
+    setCustomCycles(prev => {
+      const next = { ...prev };
+      affectedPatientNos.forEach(no => delete next[no]);
+      return next;
+    });
+    const affectedCount = affectedPatientNos.length;
+    setSelectedReminderPatientNos(new Set());
+    setShowBatchResetConfirm(false);
+    showSyncMessage(`已将 ${affectedCount} 位患者的复查周期恢复为默认规则`);
+  };
+
+  const batchResetAffectedCount = useMemo(() => {
+    return Array.from(selectedReminderPatientNos).filter(no => customCycles[no]).length;
+  }, [selectedReminderPatientNos, customCycles]);
+
+  const allVisibleSelected = useMemo(() => {
+    const allNos = visibleReminders.map(r => r.patientNo);
+    return allNos.length > 0 && allNos.every(no => selectedReminderPatientNos.has(no));
+  }, [visibleReminders, selectedReminderPatientNos]);
+
   const handleSelectPatient = (patientNo: string) => {
     setSelectedPatientNo(prev => prev === patientNo ? null : patientNo);
   };
@@ -4684,7 +4762,39 @@ function App() {
             <p>复查管理</p>
             <h2>复查提醒看板</h2>
           </div>
-          <span className="today-info">共 {overdue.length + upcoming.length + normal.length} 位患者</span>
+          <div className="reminder-board-header-right">
+            <span className="today-info">共 {overdue.length + upcoming.length + normal.length} 位患者</span>
+            {permission.canEditReminderCycle && (
+              <div className="reminder-batch-actions">
+                <label className="reminder-select-all">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={handleSelectAllVisibleReminders}
+                  />
+                  <span>全选</span>
+                </label>
+                {selectedReminderPatientNos.size > 0 && (
+                  <>
+                    <span className="reminder-selected-count">
+                      已选 {selectedReminderPatientNos.size} 人
+                      {batchResetAffectedCount > 0 && ` · 其中 ${batchResetAffectedCount} 人使用自定义周期`}
+                    </span>
+                    <button
+                      className="primary-action reminder-batch-reset-btn"
+                      onClick={openBatchResetConfirm}
+                      disabled={batchResetAffectedCount === 0}
+                    >
+                      ↺ 批量重置周期
+                    </button>
+                    <button className="ghost-btn reminder-clear-select-btn" onClick={handleClearReminderSelection}>
+                      取消选择
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         <div className="reminder-columns">
           <div className="reminder-column">
@@ -4715,6 +4825,9 @@ function App() {
                       }
                     }}
                     onGenerateConflict={() => handleGenerateConflict("patient", reminder.id)}
+                    isSelected={selectedReminderPatientNos.has(reminder.patientNo)}
+                    onToggleSelect={() => handleToggleReminderSelect(reminder.patientNo)}
+                    selectionMode={permission.canEditReminderCycle}
                   />
                 ))
               ) : (
@@ -4761,6 +4874,9 @@ function App() {
                       }
                     }}
                     onGenerateConflict={() => handleGenerateConflict("patient", reminder.id)}
+                    isSelected={selectedReminderPatientNos.has(reminder.patientNo)}
+                    onToggleSelect={() => handleToggleReminderSelect(reminder.patientNo)}
+                    selectionMode={permission.canEditReminderCycle}
                   />
                 ))
               ) : (
@@ -4807,6 +4923,9 @@ function App() {
                       }
                     }}
                     onGenerateConflict={() => handleGenerateConflict("patient", reminder.id)}
+                    isSelected={selectedReminderPatientNos.has(reminder.patientNo)}
+                    onToggleSelect={() => handleToggleReminderSelect(reminder.patientNo)}
+                    selectionMode={permission.canEditReminderCycle}
                   />
                 ))
               ) : (
@@ -5838,6 +5957,49 @@ function App() {
               </button>
               <button className="primary-action danger-btn" onClick={handleClearData}>
                 确认清空
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBatchResetConfirm && (
+        <div className="modal-overlay" onClick={() => setShowBatchResetConfirm(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>批量重置复查周期</h3>
+              <button className="modal-close" onClick={() => setShowBatchResetConfirm(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="modal-warning-icon">↺</div>
+              <p className="modal-warning-text">
+                此操作将把 <strong>{batchResetAffectedCount}</strong> 位患者的复查周期恢复为默认规则。
+              </p>
+              <ul className="modal-warning-list">
+                <li>共选择 {selectedReminderPatientNos.size} 位患者</li>
+                <li>其中使用自定义周期：{batchResetAffectedCount} 人</li>
+                <li>使用默认周期：{selectedReminderPatientNos.size - batchResetAffectedCount} 人（不受影响）</li>
+              </ul>
+              <div className="batch-reset-details">
+                <p className="batch-reset-subtitle">默认周期规则：</p>
+                <div className="cycle-rules-grid">
+                  <div className="cycle-rule-item"><span>角膜塑形镜（所有年龄）</span><strong>30 天</strong></div>
+                  <div className="cycle-rule-item"><span>儿童（单光镜/散光镜）</span><strong>30 天</strong></div>
+                  <div className="cycle-rule-item"><span>青少年（单光镜/散光镜）</span><strong>60 天</strong></div>
+                  <div className="cycle-rule-item"><span>成人/中老年（渐进片/老花镜）</span><strong>180 天</strong></div>
+                  <div className="cycle-rule-item"><span>其他组合</span><strong>90 天</strong></div>
+                </div>
+              </div>
+              <p className="modal-warning-text strong">
+                重置后不影响患者档案中除复查周期外的其他信息，是否继续？
+              </p>
+            </div>
+            <div className="modal-actions">
+              <button className="ghost-btn" onClick={() => setShowBatchResetConfirm(false)}>
+                取消
+              </button>
+              <button className="primary-action danger-btn" onClick={handleBatchResetCycles}>
+                确认重置 {batchResetAffectedCount} 人
               </button>
             </div>
           </div>
