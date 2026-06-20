@@ -4710,6 +4710,15 @@ function App() {
   };
 
   const handleBaselineChange = (type: ComparisonBaselineType) => {
+    if (type === "custom" && selectedPatientNo) {
+      const patientRecords = getPatientRecords(records, selectedPatientNo);
+      if (patientRecords.length >= 2) {
+        setCustomSelectPatientNo(selectedPatientNo);
+        setCustomSelectStep(1);
+        setComparisonBaseline({ type: "custom", customRecordIds: ["", ""] });
+        return;
+      }
+    }
     setComparisonBaseline({ type });
     if (type !== "custom") {
       setCustomSelectStep(0);
@@ -4720,11 +4729,28 @@ function App() {
   const handleSelectPatientForCustom = (patientNo: string) => {
     setCustomSelectPatientNo(patientNo);
     setCustomSelectStep(1);
+    setSelectedPatientNo(patientNo);
+    setComparisonBaseline({ type: "custom", customRecordIds: ["", ""] });
   };
 
   const handleSelectRecordForCustom = (recordId: string) => {
     const currentIds = comparisonBaseline.customRecordIds || ["", ""];
     const [firstId, secondId] = currentIds;
+
+    if (recordId === firstId) {
+      setComparisonBaseline({
+        type: "custom",
+        customRecordIds: [secondId, ""],
+      });
+      return;
+    }
+    if (recordId === secondId) {
+      setComparisonBaseline({
+        type: "custom",
+        customRecordIds: [firstId, ""],
+      });
+      return;
+    }
 
     if (!firstId) {
       setComparisonBaseline({
@@ -4826,6 +4852,16 @@ function App() {
     if (comparisonFilter === "all") return comparisons;
     return comparisons.filter(c => c.category === comparisonFilter);
   }, [comparisons, comparisonFilter]);
+
+  const displayComparisons = useMemo(() => {
+    if (comparisonBaseline.type === "custom") {
+      return filteredComparisons;
+    }
+    if (selectedPatientNo) {
+      return filteredComparisons.filter(c => c.patientNo === selectedPatientNo);
+    }
+    return filteredComparisons;
+  }, [filteredComparisons, selectedPatientNo, comparisonBaseline.type]);
 
   const filteredPatients = useMemo(() => {
     let result = patients;
@@ -5565,8 +5601,8 @@ function App() {
         )}
 
         <div className="comparison-list">
-          {filteredComparisons.length > 0 ? (
-            filteredComparisons.slice(0, 4).map((comparison, index) => (
+          {displayComparisons.length > 0 ? (
+            displayComparisons.slice(0, 4).map((comparison, index) => (
               <ComparisonCard
                 key={`${comparison.prevRecord.id}-${comparison.currRecord.id}`}
                 comparison={comparison}
@@ -5585,13 +5621,13 @@ function App() {
               </p>
             </div>
           )}
-          {filteredComparisons.length > 4 && (
+          {displayComparisons.length > 4 && (
             <div style={{ textAlign: "center", marginTop: "12px" }}>
               <button
                 className="ghost-btn"
                 onClick={() => switchStep("recheck-compare")}
               >
-                查看全部 {filteredComparisons.length} 条对比 →
+                查看全部 {displayComparisons.length} 条对比 →
               </button>
             </div>
           )}
@@ -6208,14 +6244,8 @@ function App() {
       )}
 
       <div className="comparison-list">
-        {(selectedPatientNo
-          ? filteredComparisons.filter(c => c.patientNo === selectedPatientNo)
-          : filteredComparisons
-        ).length > 0 ? (
-          (selectedPatientNo
-            ? filteredComparisons.filter(c => c.patientNo === selectedPatientNo)
-            : filteredComparisons
-          ).map((comparison, index) => (
+        {displayComparisons.length > 0 ? (
+          displayComparisons.map((comparison, index) => (
             <ComparisonCard
               key={`${comparison.prevRecord.id}-${comparison.currRecord.id}`}
               comparison={comparison}
