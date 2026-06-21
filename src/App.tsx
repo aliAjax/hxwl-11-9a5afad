@@ -16,9 +16,6 @@ import {
   saveSyncConfig,
   getSyncSettings,
   saveSyncSettings,
-  saveDraft,
-  getDraft,
-  deleteDraft,
   saveWorkflowProgress,
   getWorkflowProgress,
   getAllWorkflowProgress,
@@ -38,10 +35,6 @@ import {
   type SyncStats,
   type SyncConfig,
   type EntityType,
-  type FieldDiff,
-  type FieldResolution,
-  type FieldChoice,
-  type MergeHistoryItem,
   DEFAULT_SYNC_CONFIG,
   SYNC_STATUS_LABELS,
   SYNC_STATUS_COLORS,
@@ -58,7 +51,6 @@ import {
   resolveConflictKeepServer,
   resolveConflictWithMerge,
   calculateSyncStats,
-  computeFieldDiffs,
   stripSyncMetadata,
   formatSyncTime,
 } from "./sync";
@@ -147,7 +139,7 @@ import {
   generateRecordsExportCSV,
   formatDiff,
 } from "./utils";
-import { useSyncState } from "./hooks";
+import { useSyncState, usePrescriptionDraft } from "./hooks";
 import {
   MetricCard,
   RecordSyncIndicator,
@@ -161,6 +153,11 @@ import {
   ImportPreview,
   LensRecommendationForm,
   LensRecommendationResultDisplay,
+  SyncPanel,
+  ConflictResolveModal,
+  SyncErrorModal,
+  WorkflowNav,
+  WorkflowFlowSteps,
 } from "./components";
 
 function App() {
@@ -178,10 +175,6 @@ function App() {
   const [records, setRecords] = useState<SyncableRecord[]>([]);
   const [showPrescriptionForm, setShowPrescriptionForm] = useState(false);
   const [showImportForm, setShowImportForm] = useState(false);
-  const [prescriptionDraft, setPrescriptionDraft] = useState<PrescriptionFormData | null>(null);
-  const [prescriptionDraftSavedAt, setPrescriptionDraftSavedAt] = useState<string | null>(null);
-  const draftKeyRef = useRef<string>("prescription-draft");
-  const draftSyncRef = useRef<PrescriptionFormData | null>(null);
   const [comparisonDrawerOpen, setComparisonDrawerOpen] = useState(false);
   const [selectedComparison, setSelectedComparison] = useState<PrescriptionComparisonResult | null>(null);
   const [comparisonFilter, setComparisonFilter] = useState<ComparisonCategory | "all">("all");
@@ -255,16 +248,30 @@ function App() {
     initSyncConfig,
   } = syncState;
 
+  const prescriptionDraftHook = usePrescriptionDraft({
+    dbSupported,
+    dbReady,
+    showPrescriptionForm,
+    onShowSyncMessage: showSyncMessage,
+  });
+  const {
+    prescriptionDraft,
+    prescriptionDraftSavedAt,
+    draftKeyRef,
+    draftSyncRef,
+    setPrescriptionDraft,
+    setPrescriptionDraftSavedAt,
+    openPrescriptionForm,
+    cancelPrescriptionForm,
+    handlePrescriptionDraftChange,
+    handlePrescriptionDraftDiscard,
+    finalizeBeforeStepSwitch,
+    finalizeBeforeRoleSwitch,
+    cleanupAfterSubmit,
+  } = prescriptionDraftHook;
+
   const switchStep = useCallback((step: WorkflowStep, skipCheck = false) => {
-    if (showPrescriptionForm && draftSyncRef.current && step !== "initial-exam") {
-      const data = draftSyncRef.current;
-      const hasContent = data.patientNo.trim() || data.patientName.trim() ||
-        data.rightEye.sphere.trim() || data.leftEye.sphere.trim() ||
-        data.rightEye.cylinder.trim() || data.leftEye.cylinder.trim();
-      if (hasContent && dbSupported && dbReady) {
-        saveDraft(draftKeyRef.current, data).catch(() => {});
-      }
-    }
+    finalizeBeforeStepSwitch(step);
 
     if (!skipCheck && step !== "dashboard") {
       const rolePerm = ROLE_PERMISSIONS[currentRole];
@@ -284,7 +291,7 @@ function App() {
     }
 
     setCurrentStep(step);
-  }, [showPrescriptionForm, dbSupported, dbReady, currentRole]);
+  }, [finalizeBeforeStepSwitch, currentRole]);
   const [patientFilter, setPatientFilter] = useState<string>("");
   const [ageGroupFilter, setAgeGroupFilter] = useState<string>("");
   const [lensTypeFilter, setLensTypeFilter] = useState<string>("");
@@ -326,21 +333,13 @@ function App() {
   }, [currentRole, showPrescriptionForm, prescriptionFormDirty, showForm, editingId, patientFormDirty, showConflictModal]);
 
   const finalizeRoleSwitch = useCallback((role: UserRole) => {
-    if (showPrescriptionForm && draftSyncRef.current && dbSupported && dbReady) {
-      const data = draftSyncRef.current;
-      const hasContent = data.patientNo.trim() || data.patientName.trim() ||
-        data.rightEye.sphere.trim() || data.leftEye.sphere.trim() ||
-        data.rightEye.cylinder.trim() || data.leftEye.cylinder.trim();
-      if (hasContent) {
-        saveDraft(draftKeyRef.current, data).catch(() => {});
-      }
-    }
+    finalizeBeforeRoleSwitch();
     setCurrentRoleState(role);
     setCurrentStep(ROLE_CONFIGS[role].defaultStep);
     setExportSuccess(null);
     setShowRoleSwitchConfirm(false);
     pendingRoleRef.current = null;
-  }, [showPrescriptionForm, dbSupported, dbReady]);
+  }, [finalizeBeforeRoleSwitch]);
 
   const handleRoleChange = useCallback((role: UserRole) => {
     if (role === currentRole) return;
@@ -1356,77 +1355,6 @@ function App() {
     setShowForm(false);
   };
 
-  const openPrescriptionForm = async () => {
-    let draftData: PrescriptionFormData | null = null;
-    let draftTime: string | null = null;
-
-    if (dbSupported && dbReady) {
-      try {
-        const saved = await getDraft(draftKeyRef.current);
-        if (saved && saved.data) {
-          draftData = saved.data as PrescriptionFormData;
-          draftTime = saved.savedAt;
-        }
-      } catch {}
-    }
-
-    try {
-      const lsRaw = localStorage.getItem(draftKeyRef.current);
-      if (lsRaw) {
-        const lsParsed = JSON.parse(lsRaw);
-        if (lsParsed.data) {
-          if (!draftData || (lsParsed.savedAt && draftTime && lsParsed.savedAt > draftTime)) {
-            draftData = lsParsed.data as PrescriptionFormData;
-            draftTime = lsParsed.savedAt;
-          }
-          localStorage.removeItem(draftKeyRef.current);
-          if (draftData && dbSupported && dbReady) {
-            saveDraft(draftKeyRef.current, draftData).catch(() => {});
-          }
-        }
-      }
-    } catch {}
-
-    setPrescriptionDraft(draftData);
-    setPrescriptionDraftSavedAt(draftTime);
-    setShowPrescriptionForm(true);
-  };
-
-  const cancelPrescriptionForm = () => {
-    if (draftSyncRef.current && dbSupported && dbReady) {
-      const data = draftSyncRef.current;
-      const hasContent = data.patientNo.trim() || data.patientName.trim() ||
-        data.rightEye.sphere.trim() || data.leftEye.sphere.trim() ||
-        data.rightEye.cylinder.trim() || data.leftEye.cylinder.trim();
-      if (hasContent) {
-        saveDraft(draftKeyRef.current, data).catch(() => {});
-      } else {
-        deleteDraft(draftKeyRef.current).catch(() => {});
-      }
-    }
-    setShowPrescriptionForm(false);
-    setPrescriptionDraft(null);
-    setPrescriptionDraftSavedAt(null);
-  };
-
-  const handlePrescriptionDraftChange = useCallback((data: PrescriptionFormData) => {
-    draftSyncRef.current = data;
-    if (!dbSupported || !dbReady) return;
-    const hasContent = data.patientNo.trim() || data.patientName.trim() ||
-      data.rightEye.sphere.trim() || data.leftEye.sphere.trim() ||
-      data.rightEye.cylinder.trim() || data.leftEye.cylinder.trim();
-    if (!hasContent) return;
-    saveDraft(draftKeyRef.current, data).then(() => {
-      setPrescriptionDraftSavedAt(new Date().toISOString());
-    }).catch(() => {});
-  }, [dbSupported, dbReady]);
-
-  const handlePrescriptionDraftDiscard = useCallback(() => {
-    setPrescriptionDraft(null);
-    setPrescriptionDraftSavedAt(null);
-    deleteDraft(draftKeyRef.current).catch(() => {});
-  }, []);
-
   useEffect(() => {
     cancelAddRef.current = cancelAdd;
     cancelEditRef.current = cancelEdit;
@@ -1445,8 +1373,7 @@ function App() {
     setShowPrescriptionForm(false);
     setPrescriptionDraft(null);
     setPrescriptionDraftSavedAt(null);
-    draftSyncRef.current = null;
-    deleteDraft(draftKeyRef.current).catch(() => {});
+    cleanupAfterSubmit();
     let needCreatePatient = false;
     if (!patients.find(p => p.patientNo === data.patientNo)) {
       needCreatePatient = true;
@@ -2909,49 +2836,18 @@ function App() {
         </div>
       </div>
 
-      <div className="workflow-flow-summary">
-        <h3 className="workflow-section-title">验光流程闭环完成</h3>
-        <div className="workflow-flow-steps">
-          {(["patient-profile", "initial-exam", "recheck-compare", "prescription-summary", "export"] as WorkflowStep[]).map((step, idx) => {
-            const stepInfo = selectedPatientStepDetails[step] || computeStepInfo(step, selectedPatientNo, currentRole);
-            const isBlocked = stepInfo.status === "blocked";
-            const isCompleted = stepInfo.status === "completed";
-            const isCurrent = step === currentStep;
-            let stepClass = "";
-            if (isCurrent) stepClass = "step-active";
-            else if (isCompleted) stepClass = "step-done";
-            else if (isBlocked) stepClass = "step-blocked";
-
-            const stepStatusIcon = isBlocked ? "🔒" : isCompleted ? "✓" : "";
-            return (
-              <div
-                key={step}
-                className={`workflow-flow-step ${stepClass}`}
-                title={stepInfo.blockDetail || (isCompleted ? "已完成" : isCurrent ? "当前步骤" : "待完成")}
-              >
-                <span className="workflow-flow-icon">
-                  {STEP_ICONS[step]}
-                  {stepStatusIcon && <span className="step-status-badge">{stepStatusIcon}</span>}
-                </span>
-                <span className="workflow-flow-label">{STEP_LABELS[step]}</span>
-                {idx < 4 && <span className="workflow-flow-arrow">→</span>}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="workflow-next-step">
-        <button className="ghost-btn" onClick={() => switchStep("prescription-summary")}>
-          ← 返回处方摘要
-        </button>
-        <button className="primary-action" onClick={() => {
+      <WorkflowFlowSteps
+        selectedPatientNo={selectedPatientNo}
+        currentRole={currentRole}
+        currentStep={currentStep}
+        selectedPatientStepDetails={selectedPatientStepDetails}
+        computeStepInfo={computeStepInfo}
+        onStepChange={switchStep}
+        onBackToDashboard={() => {
           setCurrentStep("dashboard");
           setSelectedPatientNo(null);
-        }}>
-          🏠 返回工作台首页
-        </button>
-      </div>
+        }}
+      />
     </section>
   );
 
@@ -3050,36 +2946,15 @@ function App() {
         </div>
       </section>
 
-      <nav className="workflow-nav">
-        {workflowSteps.map((step) => {
-          const stepInfo = selectedPatientStepDetails[step] || computeStepInfo(step, selectedPatientNo, currentRole);
-          const isBlocked = stepInfo.status === "blocked";
-          const isCompleted = stepInfo.status === "completed" && currentStep !== step;
-          const isCurrent = currentStep === step;
-          let statusClass = "";
-          if (isCurrent) statusClass = "workflow-nav-active";
-          else if (isCompleted) statusClass = "workflow-nav-completed";
-          else if (isBlocked) statusClass = "workflow-nav-blocked";
-
-          const statusIcon = isBlocked ? "🔒" : isCompleted ? "✅" : "";
-
-          return (
-            <button
-              key={step}
-              className={`workflow-nav-item ${statusClass}`}
-              onClick={() => !isBlocked && switchStep(step)}
-              disabled={isBlocked}
-              title={stepInfo.blockDetail || (isCompleted ? "已完成" : isCurrent ? "当前步骤" : "")}
-            >
-              <span className="workflow-nav-icon">
-                {STEP_ICONS[step]}
-                {statusIcon && <span className="workflow-nav-status">{statusIcon}</span>}
-              </span>
-              <span className="workflow-nav-label">{STEP_LABELS[step]}</span>
-            </button>
-          );
-        })}
-      </nav>
+      <WorkflowNav
+        workflowSteps={workflowSteps}
+        currentStep={currentStep}
+        selectedPatientNo={selectedPatientNo}
+        currentRole={currentRole}
+        selectedPatientStepDetails={selectedPatientStepDetails}
+        computeStepInfo={computeStepInfo}
+        onStepChange={switchStep}
+      />
 
       <section className="role-selector-bar panel">
         <div className="role-selector-content">
@@ -3205,591 +3080,42 @@ function App() {
         </div>
       )}
 
-      {showSyncPanel && (
-        <div className="sync-panel-overlay" onClick={() => setShowSyncPanel(false)}>
-          <div className="sync-panel" onClick={(e) => e.stopPropagation()}>
-            <div className="sync-panel-header">
-              <h3>同步管理</h3>
-              <button className="modal-close" onClick={() => setShowSyncPanel(false)}>✕</button>
-            </div>
-            <div className="sync-panel-body">
-              <div className="sync-stats-section">
-                <h4>同步状态概览</h4>
-                <div className="sync-stats-grid">
-                  <div className="sync-stat-card synced">
-                    <div className="sync-stat-icon">{SYNC_STATUS_ICONS.synced}</div>
-                    <div className="sync-stat-info">
-                      <div className="sync-stat-value">{overallSyncStats.synced}</div>
-                      <div className="sync-stat-label">已同步</div>
-                    </div>
-                  </div>
-                  <div className="sync-stat-card pending">
-                    <div className="sync-stat-icon">{SYNC_STATUS_ICONS.pending}</div>
-                    <div className="sync-stat-info">
-                      <div className="sync-stat-value">{overallSyncStats.pending}</div>
-                      <div className="sync-stat-label">待同步</div>
-                    </div>
-                  </div>
-                  <div className="sync-stat-card conflict">
-                    <div className="sync-stat-icon">{SYNC_STATUS_ICONS.conflict}</div>
-                    <div className="sync-stat-info">
-                      <div className="sync-stat-value">{overallSyncStats.conflict}</div>
-                      <div className="sync-stat-label">冲突</div>
-                    </div>
-                  </div>
-                  <div className="sync-stat-card failed">
-                    <div className="sync-stat-icon">{SYNC_STATUS_ICONS.failed}</div>
-                    <div className="sync-stat-info">
-                      <div className="sync-stat-value">{overallSyncStats.failed}</div>
-                      <div className="sync-stat-label">失败</div>
-                    </div>
-                  </div>
-                </div>
-                <div className="sync-detail-stats">
-                  <div className="sync-detail-row">
-                    <span>患者档案</span>
-                    <span>已同步 {patientSyncStats.synced} / 待同步 {patientSyncStats.pending} / 冲突 {patientSyncStats.conflict} / 失败 {patientSyncStats.failed}</span>
-                  </div>
-                  <div className="sync-detail-row">
-                    <span>验光记录</span>
-                    <span>已同步 {recordSyncStats.synced} / 待同步 {recordSyncStats.pending} / 冲突 {recordSyncStats.conflict} / 失败 {recordSyncStats.failed}</span>
-                  </div>
-                </div>
-              </div>
+      <SyncPanel
+        open={showSyncPanel}
+        onClose={() => setShowSyncPanel(false)}
+        overallSyncStats={overallSyncStats}
+        patientSyncStats={patientSyncStats}
+        recordSyncStats={recordSyncStats}
+        isSyncing={isSyncing}
+        syncProgress={syncProgress}
+        syncConfig={syncConfig}
+        hasPendingSync={hasPendingSync}
+        patients={patients}
+        records={records}
+        onSyncAll={handleSyncAll}
+        onRetryFailed={handleRetryFailed}
+        onUpdateSyncConfig={handleUpdateSyncConfig}
+        onOpenConflict={openConflictModal}
+        onOpenSyncError={openSyncErrorModal}
+        onSyncEntity={handleSyncEntity}
+      />
 
-              {isSyncing && (
-                <div className="sync-progress-section">
-                  <h4>同步进度</h4>
-                  <div className="sync-progress-bar">
-                    <div 
-                      className="sync-progress-fill"
-                      style={{ width: `${syncProgress.total > 0 ? (syncProgress.current / syncProgress.total * 100) : 0}%` }}
-                    ></div>
-                  </div>
-                  <p className="sync-progress-text">{syncProgress.current} / {syncProgress.total}</p>
-                </div>
-              )}
+      <ConflictResolveModal
+        open={showConflictModal}
+        onClose={() => setShowConflictModal(false)}
+        conflictEntity={conflictEntity}
+        fieldResolutions={fieldResolutions}
+        setFieldResolutions={setFieldResolutions}
+        onResolveConflict={handleResolveConflict}
+      />
 
-              <div className="sync-actions-section">
-                <h4>同步操作</h4>
-                <div className="sync-actions-grid">
-                  <button 
-                    className="sync-action-btn primary"
-                    onClick={handleSyncAll}
-                    disabled={isSyncing || (!hasPendingSync && overallSyncStats.conflict === 0)}
-                  >
-                    {isSyncing ? "同步中..." : "立即同步"}
-                  </button>
-                  <button 
-                    className="sync-action-btn secondary"
-                    onClick={handleRetryFailed}
-                    disabled={isSyncing || overallSyncStats.failed === 0}
-                  >
-                    重试失败项
-                  </button>
-                </div>
-              </div>
-
-              <div className="sync-config-section">
-                <h4>模拟同步参数</h4>
-                <div className="sync-config-form">
-                  <div className="sync-config-item">
-                    <label>基础延迟 (ms)</label>
-                    <input 
-                      type="range" 
-                      min="100" 
-                      max="3000" 
-                      step="100"
-                      value={syncConfig.baseDelay}
-                      onChange={(e) => handleUpdateSyncConfig({ baseDelay: Number(e.target.value) })}
-                    />
-                    <span className="sync-config-value">{syncConfig.baseDelay}ms</span>
-                  </div>
-                  <div className="sync-config-item">
-                    <label>失败率</label>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="0.5" 
-                      step="0.05"
-                      value={syncConfig.failureRate}
-                      onChange={(e) => handleUpdateSyncConfig({ failureRate: Number(e.target.value) })}
-                    />
-                    <span className="sync-config-value">{Math.round(syncConfig.failureRate * 100)}%</span>
-                  </div>
-                  <div className="sync-config-item">
-                    <label>冲突率</label>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="0.3" 
-                      step="0.05"
-                      value={syncConfig.conflictRate}
-                      onChange={(e) => handleUpdateSyncConfig({ conflictRate: Number(e.target.value) })}
-                    />
-                    <span className="sync-config-value">{Math.round(syncConfig.conflictRate * 100)}%</span>
-                  </div>
-                  <div className="sync-config-item">
-                    <label>重复提交检测率</label>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="0.5" 
-                      step="0.05"
-                      value={syncConfig.duplicateSubmissionRate}
-                      onChange={(e) => handleUpdateSyncConfig({ duplicateSubmissionRate: Number(e.target.value) })}
-                    />
-                    <span className="sync-config-value">{Math.round(syncConfig.duplicateSubmissionRate * 100)}%</span>
-                  </div>
-                </div>
-                <p className="sync-config-hint">
-                  💡 以上参数用于模拟网络环境，方便测试各种同步场景。重复提交检测：多次重试时触发。
-                </p>
-              </div>
-
-              <div className="sync-conflict-section">
-                <h4>冲突记录</h4>
-                {overallSyncStats.conflict === 0 ? (
-                  <p className="sync-empty-text">暂无冲突记录</p>
-                ) : (
-                  <div className="sync-conflict-list">
-                    {patients.filter(p => p.syncStatus === "conflict").map(patient => (
-                      <div key={patient.id} className="sync-conflict-item">
-                        <div className="sync-conflict-info">
-                          <span className="sync-conflict-type">患者档案</span>
-                          <span className="sync-conflict-name">{patient.patientNo} · {patient.ageGroup}</span>
-                        </div>
-                        <button 
-                          className="sync-conflict-btn"
-                          onClick={() => openConflictModal("patient", patient)}
-                        >
-                          处理冲突
-                        </button>
-                      </div>
-                    ))}
-                    {records.filter(r => r.syncStatus === "conflict").map(record => (
-                      <div key={record.id} className="sync-conflict-item">
-                        <div className="sync-conflict-info">
-                          <span className="sync-conflict-type">验光记录</span>
-                          <span className="sync-conflict-name">{record.patientNo} · {record.examDate}</span>
-                        </div>
-                        <button 
-                          className="sync-conflict-btn"
-                          onClick={() => openConflictModal("record", record)}
-                        >
-                          处理冲突
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="sync-failed-section">
-                <h4>同步失败记录</h4>
-                {overallSyncStats.failed === 0 ? (
-                  <p className="sync-empty-text">暂无失败记录</p>
-                ) : (
-                  <div className="sync-failed-list">
-                    {patients.filter(p => p.syncStatus === "failed").map(patient => (
-                      <div key={patient.id} className="sync-failed-item">
-                        <div className="sync-failed-info">
-                          <span className="sync-failed-type">患者档案</span>
-                          <span className="sync-failed-name">{patient.patientNo}</span>
-                          <p className="sync-failed-error" title={(patient as any).syncError}>
-                            {(patient as any).syncError || "未知错误"}
-                          </p>
-                        </div>
-                        <div className="sync-failed-actions">
-                          <button 
-                            className="text-btn"
-                            onClick={() => openSyncErrorModal("patient", patient)}
-                          >
-                            查看详情
-                          </button>
-                          <button 
-                            className="sync-conflict-btn"
-                            onClick={() => handleSyncEntity("patient", patient.id)}
-                            disabled={(patient as any).isSubmitting}
-                          >
-                            {(patient as any).isSubmitting ? "同步中..." : "重试"}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                    {records.filter(r => r.syncStatus === "failed").map(record => (
-                      <div key={record.id} className="sync-failed-item">
-                        <div className="sync-failed-info">
-                          <span className="sync-failed-type">验光记录</span>
-                          <span className="sync-failed-name">{record.patientNo} · {record.examDate}</span>
-                          <p className="sync-failed-error" title={(record as any).syncError}>
-                            {(record as any).syncError || "未知错误"}
-                          </p>
-                        </div>
-                        <div className="sync-failed-actions">
-                          <button 
-                            className="text-btn"
-                            onClick={() => openSyncErrorModal("record", record)}
-                          >
-                            查看详情
-                          </button>
-                          <button 
-                            className="sync-conflict-btn"
-                            onClick={() => handleSyncEntity("record", record.id)}
-                            disabled={(record as any).isSubmitting}
-                          >
-                            {(record as any).isSubmitting ? "同步中..." : "重试"}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showConflictModal && conflictEntity && (() => {
-        const fieldDiffs = computeFieldDiffs(
-          conflictEntity.type,
-          conflictEntity.entity,
-          conflictEntity.entity.conflictData?.serverData
-        );
-        const changedFields = fieldDiffs.filter(d => d.isDifferent);
-        const unchangedFields = fieldDiffs.filter(d => !d.isDifferent);
-        const mergeHistory: MergeHistoryItem[] = conflictEntity.entity.conflictData?.mergeHistory || [];
-
-        const handleFieldChoiceChange = (field: string, choice: FieldChoice) => {
-          setFieldResolutions(prev => ({
-            ...prev,
-            [field]: choice
-          }));
-        };
-
-        const handleSelectAllLocal = () => {
-          const allLocal: Record<string, FieldChoice> = {};
-          changedFields.forEach(diff => {
-            allLocal[diff.field] = "local";
-          });
-          setFieldResolutions(allLocal);
-        };
-
-        const handleSelectAllServer = () => {
-          const allServer: Record<string, FieldChoice> = {};
-          changedFields.forEach(diff => {
-            allServer[diff.field] = "server";
-          });
-          setFieldResolutions(allServer);
-        };
-
-        const handleToggleAll = () => {
-          const toggled: Record<string, FieldChoice> = {};
-          changedFields.forEach(diff => {
-            const current = fieldResolutions[diff.field] || "local";
-            toggled[diff.field] = current === "local" ? "server" : "local";
-          });
-          setFieldResolutions(toggled);
-        };
-
-        const handleMerge = () => {
-          const resolutions: FieldResolution[] = changedFields.map(diff => ({
-            field: diff.field,
-            choice: fieldResolutions[diff.field] || "local"
-          }));
-          handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, true, resolutions);
-        };
-
-        const localCount = Object.values(fieldResolutions).filter(c => c === "local").length;
-        const serverCount = Object.values(fieldResolutions).filter(c => c === "server").length;
-
-        return (
-          <div className="modal-overlay" onClick={() => setShowConflictModal(false)}>
-            <div className="modal-dialog modal-xl conflict-merge-modal" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
-                <h3>字段级冲突合并</h3>
-                <button className="modal-close" onClick={() => setShowConflictModal(false)}>✕</button>
-              </div>
-              <div className="modal-body">
-                <div className="conflict-warning">
-                  <div className="conflict-warning-icon">⚠️</div>
-                  <div className="conflict-warning-text">
-                    <strong>检测到数据冲突</strong>
-                    <p>该记录的本地版本与服务端版本不一致。请逐项选择保留哪一侧的值，或使用快捷操作批量选择。</p>
-                  </div>
-                </div>
-
-                <div className="conflict-meta-row">
-                  <span className="conflict-meta-item">
-                    <span className="conflict-version-badge local-badge">本地</span>
-                    v{conflictEntity.entity.localVersion}
-                  </span>
-                  <span className="conflict-meta-sep">→</span>
-                  <span className="conflict-meta-item">
-                    <span className="conflict-version-badge server-badge">服务端</span>
-                    v{conflictEntity.entity.conflictData?.serverData?.serverVersion || "?"}
-                  </span>
-                  <span className="conflict-meta-item conflict-type-label">
-                    冲突类型：{conflictEntity.entity.conflictData?.conflictType === "update-update" ? "双方更新" : conflictEntity.entity.conflictData?.conflictType === "update-delete" ? "本地更新/服务端删除" : "本地删除/服务端更新"}
-                  </span>
-                </div>
-
-                {mergeHistory.length > 0 && (
-                  <div className="merge-history-section">
-                    <div className="merge-history-header" onClick={() => {
-                      const details = document.querySelector('.merge-history-details') as HTMLDetailsElement;
-                      if (details) details.open = !details.open;
-                    }}>
-                      <span className="merge-history-icon">📋</span>
-                      <span>历史合并记录（{mergeHistory.length} 次）</span>
-                      <span className="merge-history-toggle">▼</span>
-                    </div>
-                    <details className="merge-history-details">
-                      <summary style={{ display: 'none' }}></summary>
-                      <div className="merge-history-list">
-                        {mergeHistory.map((history, idx) => (
-                          <div key={idx} className="merge-history-item">
-                            <div className="merge-history-time">
-                              {new Date(history.mergeTimestamp).toLocaleString('zh-CN')}
-                            </div>
-                            <div className="merge-history-version">
-                              服务端版本: v{history.serverVersionAtMerge}
-                            </div>
-                            <div className="merge-history-resolutions">
-                              {history.resolutions.map((r, ridx) => (
-                                <span key={ridx} className={`merge-resolution-tag ${r.choice}`}>
-                                  {r.field}: {r.choice === 'local' ? '本地' : '服务端'}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  </div>
-                )}
-
-                {changedFields.length > 0 && (
-                  <div className="conflict-diff-section">
-                    <div className="conflict-diff-header-row">
-                      <h4 className="conflict-diff-title">变更字段（{changedFields.length} 处差异）</h4>
-                      <div className="conflict-bulk-actions">
-                        <button className="bulk-action-btn" onClick={handleSelectAllLocal}>
-                          全选本地
-                        </button>
-                        <button className="bulk-action-btn" onClick={handleSelectAllServer}>
-                          全选服务端
-                        </button>
-                        <button className="bulk-action-btn" onClick={handleToggleAll}>
-                          反选
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="conflict-merge-summary">
-                      <span className="merge-summary-item local">
-                        保留本地: <strong>{localCount}</strong> 项
-                      </span>
-                      <span className="merge-summary-item server">
-                        采用服务端: <strong>{serverCount}</strong> 项
-                      </span>
-                      <span className="merge-summary-item pending">
-                        未选择: <strong>{changedFields.length - localCount - serverCount}</strong> 项
-                      </span>
-                    </div>
-
-                    <div className="conflict-merge-table">
-                      <div className="conflict-merge-header">
-                        <span className="merge-col-field">字段</span>
-                        <span className="merge-col-choice">选择</span>
-                        <span className="merge-col-local">本地值</span>
-                        <span className="merge-col-server">服务端值</span>
-                      </div>
-                      {changedFields.map(diff => {
-                        const choice = fieldResolutions[diff.field] || "local";
-                        return (
-                          <div key={diff.field} className={`conflict-merge-row merge-choice-${choice}`}>
-                            <span className="merge-col-field">{diff.label}</span>
-                            <span className="merge-col-choice">
-                              <div className="choice-toggle-group">
-                                <button
-                                  className={`choice-toggle ${choice === 'local' ? 'active local' : ''}`}
-                                  onClick={() => handleFieldChoiceChange(diff.field, 'local')}
-                                  title="保留本地值"
-                                >
-                                  本地
-                                </button>
-                                <button
-                                  className={`choice-toggle ${choice === 'server' ? 'active server' : ''}`}
-                                  onClick={() => handleFieldChoiceChange(diff.field, 'server')}
-                                  title="采用服务端值"
-                                >
-                                  服务端
-                                </button>
-                              </div>
-                            </span>
-                            <span className={`merge-col-local ${choice === 'local' ? 'selected' : ''}`}>
-                              {String(diff.localValue)}
-                            </span>
-                            <span className={`merge-col-server ${choice === 'server' ? 'selected' : ''}`}>
-                              {String(diff.serverValue)}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {unchangedFields.length > 0 && (
-                  <details className="conflict-unchanged-section">
-                    <summary>未变更字段（{unchangedFields.length} 处一致）</summary>
-                    <div className="conflict-diff-table">
-                      <div className="conflict-diff-header">
-                        <span className="diff-col-label">字段</span>
-                        <span className="diff-col-local">本地值</span>
-                        <span className="diff-col-server">服务端值</span>
-                      </div>
-                      {unchangedFields.map(diff => (
-                        <div key={diff.field} className="conflict-diff-row diff-unchanged">
-                          <span className="diff-col-label">{diff.label}</span>
-                          <span className="diff-col-local">{String(diff.localValue)}</span>
-                          <span className="diff-col-server">{String(diff.serverValue)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                )}
-
-                <div className="conflict-diff-hint">
-                  <p><strong>合并说明：</strong></p>
-                  <ul>
-                    <li><span className="choice-indicator local">本地</span> 选中时，该字段将保留本地修改的值</li>
-                    <li><span className="choice-indicator server">服务端</span> 选中时，该字段将采用服务端更新的值</li>
-                    <li>确认合并后，系统将按照您的选择组合生成最终记录</li>
-                    <li>合并后的记录将重新进入待同步状态，等待同步到服务端</li>
-                    <li>如再次同步时遇到新的冲突，历史合并记录会被保留供参考</li>
-                  </ul>
-                </div>
-              </div>
-              <div className="modal-actions">
-                <button className="ghost-btn" onClick={() => setShowConflictModal(false)}>
-                  稍后处理
-                </button>
-                <button 
-                  className="secondary-btn"
-                  onClick={() => handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, false)}
-                >
-                  全部采用服务端
-                </button>
-                <button 
-                  className="secondary-btn"
-                  onClick={() => handleResolveConflict(conflictEntity.type, conflictEntity.entity.id, true)}
-                >
-                  全部保留本地
-                </button>
-                <button 
-                  className="primary-action merge-confirm-btn"
-                  onClick={handleMerge}
-                >
-                  ✓ 确认字段级合并
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {showSyncErrorModal && syncErrorEntity && (() => {
-        const entity = syncErrorEntity.entity;
-        const entityType = syncErrorEntity.type;
-        const typeLabel = entityType === "patient" ? "患者档案" : "验光记录";
-        const entityName = entityType === "patient" 
-          ? entity.patientNo 
-          : `${entity.patientNo} · ${entity.examDate}`;
-        
-        return (
-          <div className="modal-overlay" onClick={() => setShowSyncErrorModal(false)}>
-            <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
-                <h3>同步错误详情</h3>
-                <button className="modal-close" onClick={() => setShowSyncErrorModal(false)}>✕</button>
-              </div>
-              <div className="modal-body">
-                <div className="sync-error-warning">
-                  <div className="sync-error-icon">✕</div>
-                  <div className="sync-error-text">
-                    <strong>同步失败</strong>
-                    <p>{typeLabel}「{entityName}」最近一次同步遇到错误</p>
-                  </div>
-                </div>
-
-                <div className="sync-error-details">
-                  <div className="sync-error-detail-row">
-                    <span className="sync-error-detail-label">错误信息</span>
-                    <span className="sync-error-detail-value error-text">
-                      {entity.syncError || "未知错误"}
-                    </span>
-                  </div>
-                  <div className="sync-error-detail-row">
-                    <span className="sync-error-detail-label">提交次数</span>
-                    <span className="sync-error-detail-value">
-                      {entity.submitCount || 0} 次
-                    </span>
-                  </div>
-                  <div className="sync-error-detail-row">
-                    <span className="sync-error-detail-label">最后尝试时间</span>
-                    <span className="sync-error-detail-value">
-                      {entity.lastSyncAttempt ? formatSyncTime(entity.lastSyncAttempt) : "—"}
-                    </span>
-                  </div>
-                  <div className="sync-error-detail-row">
-                    <span className="sync-error-detail-label">上次成功同步</span>
-                    <span className="sync-error-detail-value">
-                      {entity.lastSyncedAt ? formatSyncTime(entity.lastSyncedAt) : "从未同步"}
-                    </span>
-                  </div>
-                  <div className="sync-error-detail-row">
-                    <span className="sync-error-detail-label">本地版本</span>
-                    <span className="sync-error-detail-value">
-                      v{entity.localVersion || 1}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sync-error-hint">
-                  <p><strong>常见原因与解决方案：</strong></p>
-                  <ul>
-                    <li><strong>网络超时：</strong>请检查网络连接后点击"重试同步"</li>
-                    <li><strong>服务器错误：</strong>服务器暂时不可用，请稍后再试</li>
-                    <li><strong>重复提交：</strong>请等待几秒后再重试，避免频繁提交</li>
-                    <li><strong>数据冲突：</strong>服务端数据有更新，需处理冲突后再同步</li>
-                  </ul>
-                </div>
-              </div>
-              <div className="modal-actions">
-                <button className="ghost-btn" onClick={() => setShowSyncErrorModal(false)}>
-                  关闭
-                </button>
-                <button 
-                  className="primary-action"
-                  onClick={() => {
-                    setShowSyncErrorModal(false);
-                    if (entity.syncStatus === "conflict") {
-                      openConflictModal(entityType, entity);
-                    } else {
-                      handleSyncEntity(entityType, entity.id);
-                    }
-                  }}
-                >
-                  {entity.syncStatus === "conflict" ? "处理冲突" : "重试同步"}
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      <SyncErrorModal
+        open={showSyncErrorModal}
+        onClose={() => setShowSyncErrorModal(false)}
+        syncErrorEntity={syncErrorEntity}
+        onOpenConflict={openConflictModal}
+        onSyncEntity={handleSyncEntity}
+      />
 
       {showRoleSwitchConfirm && pendingRoleRef.current && (() => {
         const targetRole = pendingRoleRef.current;

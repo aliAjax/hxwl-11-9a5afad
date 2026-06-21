@@ -5,3 +5,5 @@ export * from "./comparison";
 export * from "./drawers";
 export * from "./import";
 export * from "./lens";
+export * from "./sync";
+export * from "./workflow";
