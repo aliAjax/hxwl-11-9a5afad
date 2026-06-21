@@ -1,4 +1,4 @@
-import type { PatientProfile, RefractionRecord, ReminderStatus } from "./App";
+import type { PatientProfile, RefractionRecord, ReminderStatus } from "./types";
 import type { SyncConfig } from "./sync";
 
 export interface FilterState {

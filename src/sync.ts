@@ -1,4 +1,4 @@
-import type { PatientProfile, RefractionRecord } from "./App";
+import type { PatientProfile, RefractionRecord } from "./types";
 import type { ReminderData } from "./db";
 
 export type SyncStatus = "pending" | "synced" | "conflict" | "failed";
