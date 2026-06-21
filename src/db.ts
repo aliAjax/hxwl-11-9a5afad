@@ -167,22 +167,42 @@ export async function withTransaction<T>(
     const transaction = db.transaction(storeName, mode);
     const store = transaction.objectStore(storeName);
 
+    let settled = false;
+    let resultValue: T;
+
     transaction.onerror = () => {
-      reject(transaction.error);
+      if (!settled) {
+        settled = true;
+        reject(transaction.error);
+      }
     };
 
     transaction.oncomplete = () => {
+      if (!settled) {
+        settled = true;
+        resolve(resultValue);
+      }
     };
 
     try {
       const result = callback(store);
       if (result instanceof Promise) {
-        result.then(resolve).catch(reject);
+        result.then((value) => {
+          resultValue = value;
+        }).catch((error) => {
+          if (!settled) {
+            settled = true;
+            reject(error);
+          }
+        });
       } else {
-        resolve(result);
+        resultValue = result;
       }
     } catch (error) {
-      reject(error);
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
     }
   });
 }

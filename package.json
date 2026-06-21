@@ -3,7 +3,9 @@
     "dev": "vite --host 0.0.0.0 --port 5111",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 5111",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.0",
@@ -15,6 +17,7 @@
   "devDependencies": {
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "fake-indexeddb": "^6.2.5",
     "vitest": "^4.1.9"
   }
 }
