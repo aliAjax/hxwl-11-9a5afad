@@ -22,6 +22,9 @@ interface UseSyncStateParams {
   setRecords: React.Dispatch<React.SetStateAction<SyncableRecord[]>>;
 }
 
+type SyncPanelEntityType = Extract<EntityType, "patient" | "record">;
+type SyncPanelEntity = { type: SyncPanelEntityType; entity: any };
+
 interface UseSyncStateReturn {
   syncConfig: SyncConfig;
   setSyncConfig: React.Dispatch<React.SetStateAction<SyncConfig>>;
@@ -31,14 +34,14 @@ interface UseSyncStateReturn {
   setShowSyncPanel: React.Dispatch<React.SetStateAction<boolean>>;
   showConflictModal: boolean;
   setShowConflictModal: React.Dispatch<React.SetStateAction<boolean>>;
-  conflictEntity: { type: EntityType; entity: any } | null;
-  setConflictEntity: React.Dispatch<React.SetStateAction<{ type: EntityType; entity: any } | null>>;
+  conflictEntity: SyncPanelEntity | null;
+  setConflictEntity: React.Dispatch<React.SetStateAction<SyncPanelEntity | null>>;
   fieldResolutions: Record<string, FieldChoice>;
   setFieldResolutions: React.Dispatch<React.SetStateAction<Record<string, FieldChoice>>>;
   showSyncErrorModal: boolean;
   setShowSyncErrorModal: React.Dispatch<React.SetStateAction<boolean>>;
-  syncErrorEntity: { type: EntityType; entity: any } | null;
-  setSyncErrorEntity: React.Dispatch<React.SetStateAction<{ type: EntityType; entity: any } | null>>;
+  syncErrorEntity: SyncPanelEntity | null;
+  setSyncErrorEntity: React.Dispatch<React.SetStateAction<SyncPanelEntity | null>>;
   syncMessage: string | null;
   setSyncMessage: React.Dispatch<React.SetStateAction<string | null>>;
   autoSyncTimerRef: React.MutableRefObject<ReturnType<typeof setInterval> | null>;
@@ -49,8 +52,8 @@ interface UseSyncStateReturn {
   handleResolveConflict: (type: EntityType, id: string, keepLocal: boolean, resolutions?: FieldResolution[]) => void;
   handleGenerateConflict: (type: EntityType, id: string) => void;
   handleUpdateSyncConfig: (config: Partial<SyncConfig>) => Promise<void>;
-  openConflictModal: (type: EntityType, entity: any) => void;
-  openSyncErrorModal: (type: EntityType, entity: any) => void;
+  openConflictModal: (type: SyncPanelEntityType, entity: any) => void;
+  openSyncErrorModal: (type: SyncPanelEntityType, entity: any) => void;
   initSyncConfig: () => Promise<void>;
 }
 
@@ -65,10 +68,10 @@ export function useSyncState({
   const [syncProgress, setSyncProgress] = useState({ current: 0, total: 0 });
   const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [showConflictModal, setShowConflictModal] = useState(false);
-  const [conflictEntity, setConflictEntity] = useState<{ type: EntityType; entity: any } | null>(null);
+  const [conflictEntity, setConflictEntity] = useState<SyncPanelEntity | null>(null);
   const [fieldResolutions, setFieldResolutions] = useState<Record<string, FieldChoice>>({});
   const [showSyncErrorModal, setShowSyncErrorModal] = useState(false);
-  const [syncErrorEntity, setSyncErrorEntity] = useState<{ type: EntityType; entity: any } | null>(null);
+  const [syncErrorEntity, setSyncErrorEntity] = useState<SyncPanelEntity | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const autoSyncTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -319,7 +322,7 @@ export function useSyncState({
     }
   }, [syncConfig]);
 
-  const openConflictModal = useCallback((type: EntityType, entity: any) => {
+  const openConflictModal = useCallback((type: SyncPanelEntityType, entity: any) => {
     setConflictEntity({ type, entity });
     const fieldDiffs = computeFieldDiffs(type, entity, entity.conflictData?.serverData);
     const changedFields = fieldDiffs.filter(d => d.isDifferent);
@@ -331,7 +334,7 @@ export function useSyncState({
     setShowConflictModal(true);
   }, []);
 
-  const openSyncErrorModal = useCallback((type: EntityType, entity: any) => {
+  const openSyncErrorModal = useCallback((type: SyncPanelEntityType, entity: any) => {
     setSyncErrorEntity({ type, entity });
     setShowSyncErrorModal(true);
   }, []);
