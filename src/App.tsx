@@ -63,13 +63,8 @@ import {
   formatSyncTime,
 } from "./sync";
 import {
-  NUMBER_REGEX,
-  POSITIVE_NUMBER_REGEX,
-  NON_NEGATIVE_INTEGER_REGEX,
-  isValidNumberFormat,
   parseSafeNumber,
   cleanNumber,
-  isQuarterStep,
   type FieldError,
   validateVision,
   validateSphere,
@@ -81,19 +76,9 @@ import {
 } from "./validation";
 import {
   CSV_FIELD_MAPPINGS,
-  CSV_REQUIRED_LABELS,
   ageGroups,
-  matchHeaderToField,
-  buildHeaderMapping,
-  parseCsvLine,
-  formatRightEyeSummary,
   formatLocalDate,
-  type CsvFieldMapping,
-  type HeaderMappingResult,
-  type ParsedRecordRow,
-  type ParseErrorRow,
   type CsvParseResult,
-  validateAndBuildRecord,
   parseCsvText,
 } from "./csvParsers";
 
